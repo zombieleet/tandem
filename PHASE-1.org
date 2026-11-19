@@ -103,38 +103,86 @@ Build the daemon, then start a clean Emacs:
 - [X] The echo area never shows "[jsonrpc] Server exited"; after
   =claude-pair-stop-daemon= you see only "claude-pair: daemon stopped"
 
-* DOING M2 · Sessions and streaming chat [0/9]
-- [ ] Find =claude= (=claude-pair-claude-command=, else your PATH), check
-  its version, and give a clear error when it is missing or too old
-- [ ] One =claude -p --input-format stream-json --output-format
-  stream-json --verbose --include-partial-messages= process per session
-- [ ] Fake =claude= for tests: a small program that replays recorded
-  stream-json events, so no test calls the model
-- [ ] =session/new=, =session/prompt=, =session/cancel=: cancel sends
-  SIGINT; the next prompt restarts with =--resume=
-- [ ] Map stream-json events to =session/update=: text chunks, tool call
-  start and end, todo list, result with cost and usage, errors
-- [ ] =M-x claude-pair=: project root, daemon, new session, chat window
-- [ ] Chat buffer: read-only transcript, composer, =C-c C-c= sends,
-  =M-p= / =M-n= history, inserts batched every 30 to 50 ms, one line
-  per tool call, header line with model, status and cost
-- [ ] =C-c C-k= cancels the running turn
-- [ ] Credentials: =claude= uses your Claude Code login, or
+* DONE M2 · Sessions and streaming chat [9/9]
+- [X] Find =claude= (=claude-pair-claude-command=, else your PATH), check
+  its version (2.1.0 or later), and give a clear error when it is
+  missing or too old
+- [X] One =claude -p --input-format stream-json --output-format
+  stream-json --verbose --include-partial-messages= process per session,
+  with =--permission-prompts none= and the built-in Edit, Write and
+  NotebookEdit turned off until milestones 3 and 4
+- [X] Fake =claude= for tests (=daemon/internal/testutil/fakeclaude=):
+  replays stream-json shaped like Claude Code 2.1.327's, never calls a
+  model
+- [X] =session/new=, =session/prompt=, =session/cancel=, =session/close=:
+  cancel sends SIGINT; the next prompt restarts with =--resume=
+- [X] Map stream-json events to =session/update=: text chunks, tool call
+  start and end with a one-line title and duration, todo list, result
+  with per-turn and session cost, errors with the end of stderr
+- [X] =M-x claude-pair=: project root, daemon, new session, chat in a
+  right side window; the same project reuses its chat, =C-u= starts a
+  new one
+- [X] Chat buffer: read-only transcript, composer, =C-c C-c= sends,
+  =M-p= / =M-n= history, inserts batched every 40 ms, one line per tool
+  call, header line with model, status and cost, todo list at the top
+- [X] =C-c C-k= cancels the running turn
+- [X] Credentials: =claude= uses your Claude Code login, or
   =ANTHROPIC_API_KEY=, Bedrock or Vertex from the environment; README
   explains
 ** Auto
-- [ ] Fake =claude=: update order, cancel mid-turn, resume after cancel,
-  error result, =claude= missing
-- [ ] ERT: chunk rendering and batching, transcript is read-only,
-  composer sends, history, header line
-** Visual gate (live)
-- [ ] Ask "what files are in this repository?": text streams smoothly,
-  tool calls show as single lines, header shows cost
-- [ ] Typing elsewhere in Emacs stays smooth while Claude streams
-- [ ] =C-c C-k= in the middle of an answer stops it, and your next
-  question still knows the conversation
+- [X] Go, fake =claude=: update order, multibyte text, text that did not
+  stream, tools and todos and denials, subagent events left out, flags
+  on first start, busy prompt refused, cancel then resume, crash then
+  resume, error result, cost per turn across restarts, close stops
+  =claude=, version checks, tool titles
+- [X] Go, daemon: session lifecycle over the socket, parameter checks,
+  unknown and busy sessions, updates only to clients that follow the
+  session, idle timeout waits for a running turn, stopping the daemon
+  ends running sessions
+- [X] ERT without a daemon: batching and the flush timer, read-only
+  transcript at every edge, tool lines, a new paragraph after a tool,
+  todo list at the top, header line, result and error lines, sending,
+  refusing empty or busy sends, a failed send keeps your text, history,
+  undo in the composer while Claude streams, disconnect notice
+- [X] ERT through the daemon and the fake =claude=: a whole
+  conversation, tools in a real session, cancel then continue, same
+  project same buffer, missing and too-old =claude=
+- [X] Bugs found and fixed while building: a prompt sent right after a
+  cancel went to the exiting =claude= (now each process has its own
+  turn state and a cancelled process is set aside); the transcript
+  marker sat after the prompt, so Claude's text landed inside your
+  composer; the first character of the buffer was still editable
+- Result on 19 Nov 2026: =make check= passes: all Go packages with the
+  race detector (session tests also stable over 10 runs), 41 ERT tests,
+  0 checkdoc warnings
+** Live checks run by Claude (19 Nov 2026, your login, about $0.45)
+- [X] =total_cost_usd= is cumulative within one =claude= process
+  (0.0544, then 0.0895 after a second turn), so the daemon's per-turn
+  difference is right
+- [X] A whole conversation through Emacs, the daemon and the real
+  =claude=: answers stream, tool lines show, header showed
+  =claude-opus-5-5 · ready · $0.2120=
+- [X] Read-only commands such as =ls= run without asking (Claude Code
+  treats them as safe)
+- [X] Writing is impossible in M2: the Write tool is absent, a Bash
+  write was denied, no file appeared, and the chat said "Not allowed
+  yet: Bash"
+** Visual gate (passed 19 Nov 2026)
+Rebuild the daemon and stop the old one first, since the protocol is now 0.2.0:
+: make daemon
+: emacs -Q -L ~/personal-projects/claude-pair/lisp --eval "(require 'claude-pair)"
+: M-x claude-pair-stop-daemon
+Then open a file in a real project and run =M-x claude-pair=.
+- [X] Ask "what files are in this repository?": text streams smoothly,
+  tool calls show as single lines, header shows model and cost
+- [X] Typing elsewhere in Emacs stays smooth while Claude streams
+- [X] =C-c C-k= in the middle of a long answer stops it ("Stopped."),
+  and your next question still knows the conversation
+- [X] =M-p= brings back your last message; =C-/= in the composer undoes
+  your typing, not Claude's text
+- [X] Ask Claude to create a file: it can't, and the chat says why
 
-* TODO M3 · Permission prompts [0/6]
+* DOING M3 · Permission prompts [0/6]
 - [ ] MCP helper =claude-paird mcp=: serves the Emacs tools over stdio
   with the official Go MCP SDK, relays calls to the daemon's socket;
   passed with =--mcp-config= and =--strict-mcp-config=

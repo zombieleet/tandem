@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.1.0**. This document is the contract between the Emacs client
+Version **0.2.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -52,8 +52,10 @@ permission questions and Emacs tools.
 2. The client sends `initialize`. Every other request before a successful
    `initialize` fails with `-32002`.
 3. The connection stays open for as long as the client wants it.
-4. With no clients connected, the daemon exits after its idle timeout
-   (default 600 seconds, `--idle-timeout`, `0` disables it).
+4. With no clients connected and no turn running, the daemon exits after its
+   idle timeout (default 600 seconds, `--idle-timeout`, `0` disables it).
+   Sessions survive a client disconnecting; a client that sends
+   `session/prompt` to an existing session follows it again.
 
 ## Methods
 
@@ -95,6 +97,64 @@ No params. Result:
 | `socketPath` | string |
 | `idleTimeoutSeconds` | number |
 
+### `session/new` (client → daemon)
+
+Params: `cwd` (absolute path of an existing directory, the project root),
+`claudePath` (absolute path of the `claude` command), optional `model`.
+
+The daemon runs `claudePath --version` and refuses Claude Code older than
+2.1.0 with `-32005`. Result: `{sessionId, claudeVersion}`. The session id is a
+UUID that Claude Code also uses, so `claude --resume <sessionId>` finds the
+same conversation. The calling client follows the session. No `claude`
+process starts until the first prompt.
+
+### `session/prompt` (client → daemon)
+
+Params: `sessionId`, `text`. Result `{ok: true}` once the message is written
+to Claude Code; everything after that arrives as `session/update`. Fails with
+`-32003` while a turn is running and `-32004` for an unknown session. The
+calling client follows the session.
+
+Each session runs one process:
+
+```
+claude -p --input-format stream-json --output-format stream-json --verbose
+       --include-partial-messages --permission-mode default
+       --permission-prompts none --disallowedTools Edit,Write,NotebookEdit
+       [--model M] (--session-id ID | --resume ID)
+```
+
+The first start uses `--session-id`; every later start uses `--resume`. In
+0.2, tools that would ask for permission are denied, and the built-in
+writing tools are off, because Emacs will own every write.
+
+### `session/cancel` (client → daemon)
+
+Params: `sessionId`. Result `{cancelled: boolean}`. The daemon sends SIGINT
+to `claude`, which ends the turn and exits; the next prompt resumes the
+session in a new process.
+
+### `session/close` (client → daemon)
+
+Params: `sessionId`. Stops `claude` and forgets the session. Result `{ok: true}`.
+
+### `session/update` (daemon → client, notification)
+
+Params: `{sessionId, update}`. `update.kind` is one of:
+
+| kind | Fields | Meaning |
+|---|---|---|
+| `status` | `state`: `starting`, `running`, `requesting`, `cancelling`, `idle` | What the session is doing |
+| `init` | `model`, `claudeVersion`, `cwd`, `permissionMode`, `slashCommands` | Claude Code started |
+| `text` | `delta` | More of Claude's answer |
+| `tool` | `id`, `name`, `title`, `status` (`started`, `done`, `error`), `durationMs` when finished | A tool call; `title` is one line such as `Read src/api.ts` |
+| `todo` | `items`: `[{content, status}]` | Claude's todo list, replaced whole |
+| `result` | `subtype`, `isError`, `cancelled`, `message`, `durationMs`, `numTurns`, `costUsd`, `sessionCostUsd`, `usage`, `permissionDenials` | The turn ended; `costUsd` is this turn's cost |
+| `error` | `message`, `stderr`, `exitCode` | `claude` stopped unexpectedly |
+
+Every turn ends with a `result` (or an `error`) followed by `status` `idle`.
+Events from subagents are left out; the subagent's own tool call shows instead.
+
 ### `shutdown` (client → daemon)
 
 No params. Result `{ok: true}`. After sending the result the daemon closes
@@ -111,3 +171,6 @@ every connection, removes its socket and exits.
 | `-32603` | Internal error |
 | `-32001` | Incompatible protocol version |
 | `-32002` | Not initialized |
+| `-32003` | Session busy: a turn is running |
+| `-32004` | Unknown session |
+| `-32005` | Claude Code unavailable: missing, not executable, too old, or failed to start |

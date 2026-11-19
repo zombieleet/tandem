@@ -6,21 +6,24 @@ in its headless stream-json mode. Emacs is the client: a chat buffer, Claude's
 edits reviewed in your real buffers, and windows Claude opens for you within
 limits you set.
 
-**Status:** phase 1, milestone 1. Emacs can start the daemon, connect to it
-and stop it. Chat, permissions, edits and window layout come next; see
-[PHASE-1.org](PHASE-1.org).
+**Status:** phase 1, milestone 2. You can chat with Claude about a project,
+watch its tool calls, and stop an answer. Claude can read your project but
+cannot change it yet: tools that need your approval are denied until
+permission prompts arrive (milestone 3), and Emacs-owned edits come in
+milestone 4. See [PHASE-1.org](PHASE-1.org).
 
 ## Requirements
 
 - Emacs 29.1 or later (developed on 30.1)
 - Go 1.24 or later, to build the daemon from source
-- Claude Code (`claude` on your PATH), logged in, from milestone 2 on
+- Claude Code 2.1.0 or later (`claude` on your PATH)
 
 ## Try it from a checkout
 
 ```sh
 make daemon   # build daemon/bin/claude-paird
 make check    # go vet, gofmt, byte-compile, checkdoc, Go tests (race detector), ERT tests
+              # (no test calls the model: they use daemon/bin/fakeclaude)
 ```
 
 Then start a clean Emacs with the package on the load path:
@@ -41,11 +44,35 @@ one `make daemon` built. Set `claude-pair-daemon-command` to use another.
 
 | Command | What it does |
 |---|---|
+| `M-x claude-pair` | Chat with Claude about the current project (`C-u` starts a new session) |
 | `M-x claude-pair-connect` | Connect, starting the daemon if it isn't running |
 | `M-x claude-pair-daemon-status` | Show the daemon's version, pid, uptime and clients |
 | `M-x claude-pair-events-buffer` | Show every message exchanged with the daemon |
 | `M-x claude-pair-disconnect` | Close the connection; the daemon keeps running |
 | `M-x claude-pair-stop-daemon` | Stop the daemon |
+
+In the chat buffer, type after the `❯` prompt:
+
+| Key | What it does |
+|---|---|
+| `C-c C-c` | Send your message |
+| `C-c C-k` | Stop Claude's answer; your next message continues the conversation |
+| `M-p` / `M-n` | Step through messages you sent earlier |
+
+The header line shows the model, what Claude is doing, and the session's cost
+so far. Each tool call is one line: `▸` while it runs, `✓` or `✗` when done.
+
+## Credentials
+
+The daemon runs your installed `claude`, which uses whatever it is set up
+with: your Claude Code login, or `ANTHROPIC_API_KEY`, Amazon Bedrock or
+Google Vertex AI from the environment. The daemon inherits the environment of
+the Emacs that started it, so restart the daemon
+(`M-x claude-pair-stop-daemon`) after changing those variables.
+`claude-pair-claude-command` picks a specific `claude`, and `claude-pair-model`
+a model for new sessions.
+
+## The daemon
 
 The daemon listens on `$XDG_RUNTIME_DIR/claude-pair/daemon.sock` and logs to
 `daemon.log` in the same directory. It stops by itself after 10 minutes with
@@ -58,7 +85,8 @@ no Emacs connected (`claude-pair-daemon-idle-timeout`).
 | `lisp/` | The Emacs package |
 | `daemon/` | `claude-paird`, in Go (`cmd/claude-paird`, `internal/…`) |
 | `protocol/PROTOCOL.md` | The contract between the two |
-| `test/` | ERT tests and the checkdoc runner |
+| `test/` | ERT tests, shared helpers and the checkdoc runner |
+| `daemon/internal/testutil/fakeclaude` | A stand-in for Claude Code that the tests drive; it never calls a model |
 | `PHASE-1.org` | The phase 1 checklist, with automatic and visual tests |
 
 ## License

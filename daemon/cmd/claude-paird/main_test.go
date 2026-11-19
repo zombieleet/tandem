@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/victory/claude-pair/daemon/internal/framing"
+	"github.com/victory/claude-pair/daemon/internal/protocol"
 )
 
 // binary is the daemon built once for these tests: --detach re-executes it.
@@ -75,7 +76,8 @@ func call(t *testing.T, nc net.Conn, r *framing.Reader, id int, method string, p
 
 func TestVersion(t *testing.T) {
 	out, _, code := paird(t, "--version")
-	if code != 0 || !regexp.MustCompile(`^claude-paird \d+\.\d+\.\d+ \(protocol 0\.1\.0\)\n$`).MatchString(out) {
+	want := regexp.MustCompile(`^claude-paird \d+\.\d+\.\d+ \(protocol ` + regexp.QuoteMeta(protocol.Version) + `\)\n$`)
+	if code != 0 || !want.MatchString(out) {
 		t.Fatalf("code %d, output %q", code, out)
 	}
 }
@@ -100,7 +102,7 @@ func TestDetach(t *testing.T) {
 	}
 	defer nc.Close()
 	r := framing.NewReader(nc)
-	init := call(t, nc, r, 1, "initialize", map[string]string{"protocolVersion": "0.1.0"})
+	init := call(t, nc, r, 1, "initialize", map[string]string{"protocolVersion": protocol.Version})
 	var result struct{ PID int }
 	json.Unmarshal(init["result"], &result)
 	if fmt.Sprint(result.PID) != m[1] {

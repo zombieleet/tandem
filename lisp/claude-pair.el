@@ -29,9 +29,7 @@
 ;; lets you chat with it, review its edits and watch it work, all inside
 ;; Emacs.
 ;;
-;; This is phase 1, milestone 1: Emacs can start the daemon, connect to
-;; it and stop it.
-;;
+;;   M-x claude-pair                 chat with Claude about this project
 ;;   M-x claude-pair-connect         connect, starting the daemon if needed
 ;;   M-x claude-pair-daemon-status   show the daemon's version, pid and clients
 ;;   M-x claude-pair-disconnect      close the connection, keep the daemon
@@ -41,6 +39,7 @@
 ;;; Code:
 
 (require 'claude-pair-rpc)
+(require 'claude-pair-chat)
 
 ;;;###autoload
 (defun claude-pair-connect ()

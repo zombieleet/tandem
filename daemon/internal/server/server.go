@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"github.com/victory/claude-pair/daemon/internal/paths"
 	"github.com/victory/claude-pair/daemon/internal/protocol"
 	"github.com/victory/claude-pair/daemon/internal/rpc"
+	"github.com/victory/claude-pair/daemon/internal/session"
 )
 
 // AlreadyRunningError means another daemon answers on the socket.
@@ -49,6 +51,12 @@ type client struct {
 	name        atomic.Value // string
 }
 
+// sessionEntry is a session and the clients that receive its updates.
+type sessionEntry struct {
+	s    *session.Session
+	subs map[*client]bool
+}
+
 // Daemon serves clients on a Unix socket.
 type Daemon struct {
 	opts    Options
@@ -59,6 +67,7 @@ type Daemon struct {
 
 	mu         sync.Mutex
 	clients    map[int]*client
+	sessions   map[string]*sessionEntry
 	nextClient int
 	idle       *time.Timer
 	stopping   bool
@@ -73,7 +82,7 @@ func New(opts Options) *Daemon {
 	if opts.Log == nil {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Daemon{opts: opts, clients: map[int]*client{}, done: make(chan struct{})}
+	return &Daemon{opts: opts, clients: map[int]*client{}, sessions: map[string]*sessionEntry{}, done: make(chan struct{})}
 }
 
 // Done is closed once the daemon has stopped.
@@ -136,9 +145,20 @@ func (d *Daemon) Stop(reason string) {
 		for _, c := range d.clients {
 			clients = append(clients, c)
 		}
+		sessions := make([]*session.Session, 0, len(d.sessions))
+		for _, e := range d.sessions {
+			sessions = append(sessions, e.s)
+		}
+		d.sessions = map[string]*sessionEntry{}
 		d.mu.Unlock()
 
 		d.opts.Log.Info("stopping", "reason", reason)
+		var closing sync.WaitGroup
+		for _, s := range sessions {
+			closing.Add(1)
+			go func() { defer closing.Done(); s.Close() }()
+		}
+		closing.Wait()
 		if d.ln != nil {
 			d.ln.Close()
 		}
@@ -164,7 +184,7 @@ func (d *Daemon) Stop(reason string) {
 // Status reports the daemon's state.
 func (d *Daemon) Status() protocol.StatusResult {
 	d.mu.Lock()
-	clients := len(d.clients)
+	clients, sessions := len(d.clients), len(d.sessions)
 	d.mu.Unlock()
 	return protocol.StatusResult{
 		Version:            d.opts.Version,
@@ -172,7 +192,7 @@ func (d *Daemon) Status() protocol.StatusResult {
 		PID:                os.Getpid(),
 		UptimeSeconds:      int(math.Round(time.Since(d.started).Seconds())),
 		Clients:            clients,
-		Sessions:           0,
+		Sessions:           sessions,
 		SocketPath:         d.opts.SocketPath,
 		IdleTimeoutSeconds: d.opts.IdleTimeout.Seconds(),
 	}
@@ -220,6 +240,9 @@ func (d *Daemon) accept(nc *net.UnixConn) {
 		c.conn.Serve()
 		d.mu.Lock()
 		delete(d.clients, id)
+		for _, e := range d.sessions {
+			delete(e.subs, c)
+		}
 		d.mu.Unlock()
 		d.opts.Log.Debug("client disconnected", "client", id, "name", c.name.Load())
 		d.armIdle()
@@ -236,6 +259,28 @@ func (d *Daemon) handle(c *client, method string, params json.RawMessage) (any, 
 	switch method {
 	case "daemon/status":
 		return d.Status(), nil
+	case "session/new":
+		return d.newSession(c, params)
+	case "session/prompt":
+		return d.prompt(c, params)
+	case "session/cancel":
+		e, err := d.lookup(params, nil)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]bool{"cancelled": e.s.Cancel()}, nil
+	case "session/close":
+		var id string
+		e, err := d.lookup(params, &id)
+		if err != nil {
+			return nil, err
+		}
+		d.mu.Lock()
+		delete(d.sessions, id)
+		d.mu.Unlock()
+		e.s.Close()
+		d.armIdle()
+		return map[string]bool{"ok": true}, nil
 	case "shutdown":
 		return rpc.Then{
 			Result: map[string]bool{"ok": true},
@@ -272,11 +317,127 @@ func (d *Daemon) initialize(c *client, params json.RawMessage) (any, error) {
 	}, nil
 }
 
+// newSession checks the project directory and the claude command, then
+// registers a session. Claude starts with the first prompt.
+func (d *Daemon) newSession(c *client, params json.RawMessage) (any, error) {
+	var p struct {
+		Cwd        string `json:"cwd"`
+		ClaudePath string `json:"claudePath"`
+		Model      string `json:"model"`
+	}
+	if len(params) == 0 || json.Unmarshal(params, &p) != nil {
+		return nil, rpc.Errorf(protocol.InvalidParams, "session/new needs cwd and claudePath")
+	}
+	if info, err := os.Stat(p.Cwd); !filepath.IsAbs(p.Cwd) || err != nil || !info.IsDir() {
+		return nil, rpc.Errorf(protocol.InvalidParams, "cwd must be an existing absolute directory, got %q", p.Cwd)
+	}
+	version, err := session.CheckClaude(p.ClaudePath)
+	if err != nil {
+		return nil, rpc.Errorf(protocol.ClaudeUnavailable, "%s", err.Error())
+	}
+	id := newSessionID()
+	s := session.New(session.Options{
+		ID:         id,
+		Cwd:        p.Cwd,
+		ClaudePath: p.ClaudePath,
+		Model:      p.Model,
+		Log:        d.opts.Log,
+		Emit:       func(u session.Update) { d.broadcast(id, u) },
+		OnIdle:     d.armIdle,
+	})
+	d.mu.Lock()
+	d.sessions[id] = &sessionEntry{s: s, subs: map[*client]bool{c: true}}
+	d.mu.Unlock()
+	d.opts.Log.Info("session created", "session", id, "cwd", p.Cwd, "claude", version)
+	return map[string]string{"sessionId": id, "claudeVersion": version}, nil
+}
+
+func (d *Daemon) prompt(c *client, params json.RawMessage) (any, error) {
+	var p struct {
+		SessionID string `json:"sessionId"`
+		Text      string `json:"text"`
+	}
+	if len(params) == 0 || json.Unmarshal(params, &p) != nil || p.Text == "" {
+		return nil, rpc.Errorf(protocol.InvalidParams, "session/prompt needs a sessionId and some text")
+	}
+	d.mu.Lock()
+	e, ok := d.sessions[p.SessionID]
+	if ok {
+		e.subs[c] = true
+	}
+	d.mu.Unlock()
+	if !ok {
+		return nil, rpc.Errorf(protocol.UnknownSession, "no session %q", p.SessionID)
+	}
+	if err := e.s.Prompt(p.Text); err != nil {
+		if errors.Is(err, session.ErrBusy) {
+			return nil, rpc.Errorf(protocol.SessionBusy, "%s", err.Error())
+		}
+		return nil, rpc.Errorf(protocol.ClaudeUnavailable, "%s", err.Error())
+	}
+	d.mu.Lock()
+	if d.idle != nil {
+		d.idle.Stop()
+	}
+	d.mu.Unlock()
+	return map[string]bool{"ok": true}, nil
+}
+
+// lookup finds the session named by params' sessionId, storing the id in idOut.
+func (d *Daemon) lookup(params json.RawMessage, idOut *string) (*sessionEntry, error) {
+	var p struct {
+		SessionID string `json:"sessionId"`
+	}
+	if len(params) == 0 || json.Unmarshal(params, &p) != nil || p.SessionID == "" {
+		return nil, rpc.Errorf(protocol.InvalidParams, "a sessionId is required")
+	}
+	d.mu.Lock()
+	e, ok := d.sessions[p.SessionID]
+	d.mu.Unlock()
+	if !ok {
+		return nil, rpc.Errorf(protocol.UnknownSession, "no session %q", p.SessionID)
+	}
+	if idOut != nil {
+		*idOut = p.SessionID
+	}
+	return e, nil
+}
+
+// broadcast sends a session update to the clients that follow the session.
+func (d *Daemon) broadcast(id string, u session.Update) {
+	d.mu.Lock()
+	e, ok := d.sessions[id]
+	var subs []*client
+	if ok {
+		for c := range e.subs {
+			subs = append(subs, c)
+		}
+	}
+	d.mu.Unlock()
+	for _, c := range subs {
+		_ = c.conn.Notify("session/update", map[string]any{"sessionId": id, "update": u})
+	}
+}
+
+func newSessionID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = b[6]&0x0f | 0x40 // version 4
+	b[8] = b[8]&0x3f | 0x80 // RFC 4122 variant
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// armIdle starts the idle timer when no client is connected and no turn runs.
 func (d *Daemon) armIdle() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.opts.IdleTimeout <= 0 || len(d.clients) > 0 || d.stopping {
 		return
+	}
+	for _, e := range d.sessions {
+		if e.s.Busy() {
+			return
+		}
 	}
 	if d.idle != nil {
 		d.idle.Stop()

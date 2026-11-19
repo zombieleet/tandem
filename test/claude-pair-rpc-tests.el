@@ -10,43 +10,7 @@
 
 (require 'ert)
 (require 'claude-pair)
-
-(defun claude-pair-test--wait-for (predicate &optional timeout)
-  "Wait until PREDICATE returns non-nil or TIMEOUT seconds pass.
-Return the last value of PREDICATE."
-  (let ((deadline (+ (float-time) (or timeout 5)))
-        (value nil))
-    (while (and (not (setq value (funcall predicate)))
-                (< (float-time) deadline))
-      (accept-process-output nil 0.05))
-    value))
-
-(defun claude-pair-test--private-dir (&optional mode)
-  "Make a temporary directory with MODE, #o700 by default."
-  (let ((dir (make-temp-file "cpt-" t)))
-    (set-file-modes dir (or mode #o700))
-    dir))
-
-(defmacro claude-pair-test-with-daemon-dir (&rest body)
-  "Run BODY with the socket in a fresh private directory.
-Afterwards stop any daemon started there and delete the directory."
-  (declare (indent 0) (debug t))
-  `(let* ((dir (claude-pair-test--private-dir))
-          (claude-pair-socket-path (expand-file-name "d.sock" dir))
-          (claude-pair-daemon-idle-timeout 60)
-          (claude-pair-daemon-command nil)
-          (claude-pair-rpc--connection nil)
-          (claude-pair-rpc--server-info nil))
-     (unwind-protect
-         (progn ,@body)
-       (ignore-errors (claude-pair-rpc-shutdown-daemon))
-       (claude-pair-test--wait-for
-        (lambda () (not (file-exists-p claude-pair-socket-path))) 5)
-       (delete-directory dir t))))
-
-(defun claude-pair-test--pid ()
-  "Return the pid the connected daemon reported."
-  (plist-get (claude-pair-rpc-server-info) :pid))
+(require 'claude-pair-test-helpers)
 
 ;;;; Paths and commands
 
@@ -156,10 +120,11 @@ Afterwards stop any daemon started there and delete the directory."
 
 (ert-deftest claude-pair-rpc-incompatible-protocol-is-a-clear-error ()
   (claude-pair-test-with-daemon-dir
-    (let* ((claude-pair-rpc-protocol-version "9.0.0")
+    (let* ((ours claude-pair-rpc-protocol-version)
+           (claude-pair-rpc-protocol-version "9.0.0")
            (err (should-error (claude-pair-connect) :type 'user-error)))
       (should (string-match-p "9\\.0\\.0" (cadr err)))
-      (should (string-match-p "0\\.1\\.0" (cadr err)))
+      (should (string-match-p (regexp-quote ours) (cadr err)))
       (should (string-match-p "claude-pair-stop-daemon" (cadr err)))
       (should-not (claude-pair-rpc-live-p)))))
 

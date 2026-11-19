@@ -3,7 +3,7 @@ GO ?= go
 LISP := $(wildcard lisp/*.el)
 TESTS := $(wildcard test/*-tests.el)
 
-.PHONY: all deps daemon compile test test-lisp test-daemon vet checkdoc check clean help
+.PHONY: all deps daemon fakeclaude compile test test-lisp test-daemon vet checkdoc check clean help
 
 all: daemon compile
 
@@ -15,6 +15,10 @@ deps:
 daemon:
 	cd daemon && $(GO) build -trimpath -o bin/claude-paird ./cmd/claude-paird
 
+## fakeclaude: build the stand-in for Claude Code that the ERT tests use
+fakeclaude:
+	cd daemon && $(GO) build -o bin/fakeclaude ./internal/testutil/fakeclaude
+
 ## compile: byte-compile the Emacs package, treating warnings as failures
 compile:
 	$(EMACS) -Q --batch -L lisp \
@@ -22,7 +26,7 @@ compile:
 	  -f batch-byte-compile $(LISP)
 
 ## test-lisp: run the ERT suite in batch mode against the built daemon
-test-lisp: daemon
+test-lisp: daemon fakeclaude
 	$(EMACS) -Q --batch -L lisp -L test \
 	  --eval '(setq load-prefer-newer t)' \
 	  $(addprefix -l ,$(TESTS)) -f ert-run-tests-batch-and-exit

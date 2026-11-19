@@ -47,7 +47,7 @@
 (defconst claude-pair-version "0.1.0"
   "Version of the claude-pair Emacs package.")
 
-(defvar claude-pair-rpc-protocol-version "0.1.0"
+(defvar claude-pair-rpc-protocol-version "0.2.0"
   "Protocol version this client speaks.  See protocol/PROTOCOL.md.")
 
 (defcustom claude-pair-daemon-command nil
@@ -81,6 +81,9 @@ Zero turns the log off; nil keeps everything."
 (defvar claude-pair-rpc-notification-functions nil
   "Abnormal hook run for each notification from the daemon.
 Each function receives the method (a symbol) and the params (a plist).")
+
+(defvar claude-pair-rpc-disconnect-hook nil
+  "Normal hook run after the connection to the daemon closes.")
 
 (defvar claude-pair-rpc--connection nil
   "The current `jsonrpc-process-connection' to the daemon, or nil.")
@@ -243,6 +246,11 @@ is non-nil, in which case return nil."
   "Return the daemon's initialize result as a plist, or nil."
   (and (claude-pair-rpc-live-p) claude-pair-rpc--server-info))
 
+(defun claude-pair-rpc-error-message (err)
+  "Return the daemon's message from ERR, a `jsonrpc-error' condition."
+  (or (alist-get 'jsonrpc-error-message (cdr err))
+      (error-message-string err)))
+
 (defun claude-pair-rpc-request (method &optional params timeout)
   "Send METHOD with PARAMS to the daemon and return the result.
 Wait at most TIMEOUT seconds, 10 by default."
@@ -297,7 +305,8 @@ Return non-nil if a daemon was running."
           claude-pair-rpc--server-info nil)
     (unless claude-pair-rpc--expected-disconnect
       ;; Runs inside the sentinel, where messages are hidden; post it after.
-      (run-at-time 0 nil #'message "claude-pair: lost the connection to the daemon"))))
+      (run-at-time 0 nil #'message "claude-pair: lost the connection to the daemon"))
+    (run-hooks 'claude-pair-rpc-disconnect-hook)))
 
 (provide 'claude-pair-rpc)
 ;;; claude-pair-rpc.el ends here

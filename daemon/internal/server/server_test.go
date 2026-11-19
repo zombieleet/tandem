@@ -44,6 +44,8 @@ func startDaemon(t *testing.T, idle time.Duration, prefix string) *Daemon {
 
 type message struct {
 	ID     json.RawMessage `json:"id"`
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params"`
 	Result json.RawMessage `json:"result"`
 	Error  *struct {
 		Code    int             `json:"code"`
@@ -57,6 +59,7 @@ type testClient struct {
 	nc     net.Conn
 	reader *framing.Reader
 	nextID int
+	notes  []message // notifications read while waiting for a reply
 }
 
 func connect(t *testing.T, path string) *testClient {
@@ -100,11 +103,28 @@ func (c *testClient) request(method string, params any) message {
 	c.t.Helper()
 	c.nextID++
 	c.send(map[string]any{"jsonrpc": "2.0", "id": c.nextID, "method": method, "params": params})
-	m := c.read()
-	if string(m.ID) != fmt.Sprint(c.nextID) {
-		c.t.Fatalf("reply id %s, want %d", m.ID, c.nextID)
+	for {
+		m := c.read()
+		if m.Method != "" && len(m.ID) == 0 {
+			c.notes = append(c.notes, m)
+			continue
+		}
+		if string(m.ID) != fmt.Sprint(c.nextID) {
+			c.t.Fatalf("reply id %s, want %d", m.ID, c.nextID)
+		}
+		return m
 	}
-	return m
+}
+
+// note returns the next notification, reading one if none is buffered.
+func (c *testClient) note() message {
+	c.t.Helper()
+	if len(c.notes) > 0 {
+		m := c.notes[0]
+		c.notes = c.notes[1:]
+		return m
+	}
+	return c.read()
 }
 
 func (c *testClient) initialize(version string) message {
@@ -173,7 +193,7 @@ func TestRequestBeforeInitialize(t *testing.T) {
 func TestIncompatibleProtocol(t *testing.T) {
 	d := startDaemon(t, 0, "cpd-")
 	c := connect(t, d.opts.SocketPath)
-	for _, v := range []string{"1.0.0", "0.2.0"} {
+	for _, v := range []string{"1.0.0", "0.1.0", "0.3.0"} {
 		m := c.initialize(v)
 		wantCode(t, m, protocol.IncompatibleProtocol)
 		if !strings.Contains(m.Error.Message, v) || !strings.Contains(m.Error.Message, protocol.Version) {
