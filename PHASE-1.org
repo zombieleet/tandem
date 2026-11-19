@@ -1,0 +1,214 @@
+#+TITLE: claude-pair · Phase 1 checklist
+#+STARTUP: overview
+#+TODO: TODO DOING | DONE
+
+Phase 1 goal: you can use claude-pair every day on a real repository.
+Linux first; macOS needs a tester.
+
+How testing works on every item:
+
+- *Auto*: tests Claude writes and runs (=make check=). An item is not
+  done until they pass.
+- *Visual*: what you check by hand in your own Emacs. Tick the box
+  when it looks and feels right, or note what's wrong under it.
+- Each milestone ends at a visual gate. The next milestone starts
+  after you sign off on the gate.
+- Tests never call the real model unless they are marked *live*. Live
+  checks use your Claude Code login, so they only run with your OK.
+
+* Decisions
+- 19 Nov 2026 :: The daemon is written in Go. It drives your installed
+  =claude= in headless stream-json mode instead of using the TypeScript
+  Agent SDK. The first TypeScript version of M1 was replaced; the
+  protocol and the Emacs side did not change.
+- 19 Nov 2026 :: Reviews and permission questions go through
+  =--permission-prompt-tool=, served by a stdio MCP helper
+  (=claude-paird mcp=) that relays to the daemon's private socket.
+- 19 Nov 2026 :: Cancel sends SIGINT to =claude=; the next prompt
+  resumes the session with =--resume=.
+
+* DONE Live checks before choosing Go [3/3]
+Run 19 Nov 2026 on Claude Code 2.1.327 with your login.
+- [X] A permission prompt tool can hold a review for 10½ minutes, then
+  allow it: the Bash command ran and Claude answered "spike-ok". Passed
+  with default MCP settings (636 s) and with a per-server =timeout=
+  (639 s). The tool receives =tool_name=, =input= and =tool_use_id=.
+- [X] SIGINT in the middle of an answer ends the turn cleanly: a
+  =result= with =error_during_execution=, exit code 0, 0.7 s after the
+  signal. =--resume= then answered "tangerine", so the conversation
+  survived. Restart to =system/init= took 0.34 s.
+- [X] After SIGINT the process exits even with its input open, so cancel
+  always means SIGINT plus =--resume=.
+
+* DONE M0 · Repository and tooling [3/3]
+- [X] Layout: =lisp/=, =daemon/=, =protocol/=, =test/=, =Makefile=, =README.md=, =.gitignore=
+- [X] Daemon toolchain: Go 1.24+, standard library only so far;
+  =go vet=, =gofmt=, =go test -race=
+- [X] =make daemon=, =make compile= (warnings are errors), =make vet=,
+  =make checkdoc=, =make test=, =make check=
+** Auto
+- [X] =make check= passes on a clean checkout
+** Visual
+None for this milestone.
+
+* DONE M1 · Daemon transport and handshake [9/9]
+- [X] =protocol/PROTOCOL.md= v0.1: framing, =initialize=, =daemon/status=,
+  =shutdown=, error codes
+- [X] Content-Length framing that counts UTF-8 bytes
+- [X] JSON-RPC 2.0 in both directions, one goroutine per request,
+  standard and custom error codes
+- [X] Socket at =$XDG_RUNTIME_DIR/claude-pair/daemon.sock=: directory
+  =0700=, socket =0600=; refuses a directory owned by someone else;
+  replaces a stale socket; refuses to start twice
+- [X] =initialize= with protocol version check
+- [X] Idle shutdown (default 10 minutes with no clients)
+- [X] =--detach= launcher that returns once the socket accepts connections
+- [X] Emacs connects with =jsonrpc.el=, starts the daemon when absent,
+  sends =initialize=
+- [X] Commands: =claude-pair-connect=, =claude-pair-daemon-status=,
+  =claude-pair-disconnect=, =claude-pair-stop-daemon=,
+  =claude-pair-events-buffer=
+** Auto
+- [X] Framing: round trip; one byte at a time; every split point;
+  several messages in one chunk; multibyte text; bad headers; truncated
+  streams
+- [X] Server: handshake; request before =initialize=; incompatible
+  version; bad params; unknown method; invalid JSON; not JSON-RPC;
+  broken framing; 50 concurrent requests; socket and directory
+  permissions; second daemon refused; stale socket replaced; a regular
+  file left alone; stopping never removes another daemon's socket; idle
+  shutdown; =shutdown= removes the socket
+- [X] Command line: =--version=, =--detach= twice, unsafe directory, bad
+  arguments, =--help=
+- [X] Emacs (ERT, batch, against the Go daemon): socket path rules;
+  finding the built daemon; a clear error when it isn't built; connect
+  starts the daemon; status; disconnect keeps it; stop; reconnect starts
+  a new one; incompatible version, missing command and unsafe directory
+  give clear errors; a dying daemon is reported once without jsonrpc's
+  "Server exited" noise; a daemon started by one Emacs outlives it
+- Result on 19 Nov 2026: =make check= passes: 39 Go test cases with the
+  race detector, 20 ERT tests, 0 checkdoc warnings, clean =go vet= and
+  =gofmt=
+** Visual gate (passed 19 Nov 2026)
+Build the daemon, then start a clean Emacs:
+: make daemon
+: emacs -Q -L ~/personal-projects/claude-pair/lisp --eval "(require 'claude-pair)"
+- [X] =M-x claude-pair-connect= says it connected, with daemon version and pid
+- [X] =M-x claude-pair-daemon-status= shows version, pid, uptime, 1 client
+- [X] =M-x claude-pair-events-buffer= shows the =initialize= exchange
+- [X] =M-x claude-pair-stop-daemon=, then =M-x claude-pair-connect=
+  again: a new pid
+- [X] Quit Emacs, start it again within 10 minutes, run
+  =claude-pair-daemon-status=: same pid as before (the daemon outlived Emacs)
+- [X] The echo area never shows "[jsonrpc] Server exited"; after
+  =claude-pair-stop-daemon= you see only "claude-pair: daemon stopped"
+
+* DOING M2 · Sessions and streaming chat [0/9]
+- [ ] Find =claude= (=claude-pair-claude-command=, else your PATH), check
+  its version, and give a clear error when it is missing or too old
+- [ ] One =claude -p --input-format stream-json --output-format
+  stream-json --verbose --include-partial-messages= process per session
+- [ ] Fake =claude= for tests: a small program that replays recorded
+  stream-json events, so no test calls the model
+- [ ] =session/new=, =session/prompt=, =session/cancel=: cancel sends
+  SIGINT; the next prompt restarts with =--resume=
+- [ ] Map stream-json events to =session/update=: text chunks, tool call
+  start and end, todo list, result with cost and usage, errors
+- [ ] =M-x claude-pair=: project root, daemon, new session, chat window
+- [ ] Chat buffer: read-only transcript, composer, =C-c C-c= sends,
+  =M-p= / =M-n= history, inserts batched every 30 to 50 ms, one line
+  per tool call, header line with model, status and cost
+- [ ] =C-c C-k= cancels the running turn
+- [ ] Credentials: =claude= uses your Claude Code login, or
+  =ANTHROPIC_API_KEY=, Bedrock or Vertex from the environment; README
+  explains
+** Auto
+- [ ] Fake =claude=: update order, cancel mid-turn, resume after cancel,
+  error result, =claude= missing
+- [ ] ERT: chunk rendering and batching, transcript is read-only,
+  composer sends, history, header line
+** Visual gate (live)
+- [ ] Ask "what files are in this repository?": text streams smoothly,
+  tool calls show as single lines, header shows cost
+- [ ] Typing elsewhere in Emacs stays smooth while Claude streams
+- [ ] =C-c C-k= in the middle of an answer stops it, and your next
+  question still knows the conversation
+
+* TODO M3 · Permission prompts [0/6]
+- [ ] MCP helper =claude-paird mcp=: serves the Emacs tools over stdio
+  with the official Go MCP SDK, relays calls to the daemon's socket;
+  passed with =--mcp-config= and =--strict-mcp-config=
+- [ ] Permission tool via =--permission-prompt-tool=: =permission/request=
+  to Emacs, answered with one text block of JSON (allow, optionally with
+  =updatedInput=, or deny with a message), never =structuredContent=
+- [ ] Per-server MCP =timeout= set high, so your =MCP_TOOL_TIMEOUT= can't
+  cut a review short
+- [ ] "Always allow": check whether the permission tool accepts
+  =updatedPermissions=; otherwise write the rule to
+  =.claude/settings.local.json=
+- [ ] Cancelling the turn withdraws an open prompt in Emacs
+- [ ] Emacs prompt with =read-multiple-choice=: command shown fontified;
+  deny asks for a reason
+** Auto
+- [ ] Fake =claude= calling the helper: allow, deny with reason, always
+  allow, cancel while waiting
+- [ ] ERT: prompt text, answer mapping
+** Visual gate (live)
+- [ ] Ask Claude to run =ls=: the prompt shows the exact command
+- [ ] Deny with a reason: Claude's reply reflects your reason
+- [ ] "Always allow" for =ls=: the next =ls= runs without a prompt
+
+* TODO M4 · Edits with whole-edit review [0/9]
+Phase 1 approves or rejects an edit as a whole. Per-hunk review is Phase 2.
+- [ ] MCP tools =edit_file= and =write_file= in the helper, with the
+  same inputs as the built-in Edit and Write; built-in Edit, Write and
+  NotebookEdit turned off with =--disallowedTools=
+- [ ] Review in the permission tool: =buffer/snapshot= → validate →
+  =review/propose= → allow with =updatedInput=, or deny with your note;
+  decisions kept by =tool_use_id= for the tool result
+- [ ] The daemon passes its own =--settings= and =--setting-sources=, so
+  no allow rule can skip review of the edit tools
+- [ ] The edit tool commits in Emacs with a second tick check
+- [ ] Error messages match the built-in Edit tool (not found, several matches)
+- [ ] Emacs shows the proposal in the real buffer: added text tinted,
+  removed text struck through; =C-c C-a= applies, =C-c C-k= rejects
+  with a reason
+- [ ] An applied edit is one undo step
+- [ ] Autosave only when the buffer had no unsaved changes of yours
+- [ ] =write_file= creates new files
+** Auto
+- [ ] Daemon: validation errors, allow and deny mapping, conflict path,
+  an allow rule in settings does not skip review
+- [ ] ERT: proposal overlays, apply keeps the text, reject restores the
+  exact original, tick conflict, single undo step, autosave rule
+** Visual gate (live)
+- [ ] Ask Claude to change a function: the proposal appears in the buffer
+- [ ] Apply: the file is saved, =C-/= undoes the whole edit at once
+- [ ] Reject with a reason: Claude responds to the reason
+- [ ] Edit a file with unsaved changes of yours: nothing of yours is
+  saved behind your back
+
+* TODO M5 · Layout manager [0/6]
+- [ ] Claude tab; chat side window survives =C-x 1=
+- [ ] Windows Claude creates are tagged; Claude closes only its own
+- [ ] Limits: at least 2, at most 5 windows; at the limit, reuse Claude's
+  least recently used window
+- [ ] Focus guard: never selects a window, never moves point where you
+  typed in the last 3 seconds
+- [ ] MCP tools: =emacs_open_file=, =emacs_close_window=, =emacs_list_windows=
+- [ ] Edit review (M4) opens files through the layout manager
+** Auto
+- [ ] ERT: window counting, limit error text, ownership, LRU choice,
+  focus guard timing
+** Visual gate (live)
+- [ ] Ask Claude to open 6 files: never more than 5 windows
+- [ ] Keep typing in your own window while Claude opens files: your
+  cursor never moves
+- [ ] =C-x 1= keeps the chat window
+
+* TODO M6 · Phase 1 wrap-up [0/5]
+- [ ] README: install, configure, suggested key binding
+- [ ] Prebuilt daemon binaries for Linux and macOS (amd64 and arm64)
+- [ ] =make check= clean
+- [ ] Your sign-off: a week of daily use on a real repository
+- [ ] macOS run by a tester

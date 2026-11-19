@@ -1,0 +1,4 @@
+*.elc
+/daemon/bin/
+*.log
+.DS_Store
