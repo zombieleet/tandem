@@ -100,25 +100,32 @@ so far. Each tool call is one line: `▸` while it runs, `✓` or `✗` when don
 ## Reviewing edits
 
 Claude never writes your files behind your back. Each edit appears in the
-file's buffer as a proposal, with a line above it: the text to go struck
-through, and the new text below it as real lines you can scroll through,
-move around in and read, highlighted by the buffer's mode. Both are
+file's buffer as a proposal, split into hunks: the blocks of lines that
+change, each with a line above it ("hunk 2 of 3"). The lines between hunks
+are left alone, and you can keep editing them. In a hunk the text to go is
+struck through, and the new text sits below it as real lines you can scroll
+through, move around in and read, highlighted by the buffer's mode. Both are
 read-only until you decide. The new text is for display only: it is not an
 undo step, it does not mark the buffer modified, and saving (`C-x C-s`)
 writes only your text, with the proposal taken out while your save hooks
-and formatters run:
+and formatters run.
+
+With point on a hunk:
 
 | Key | What it does |
 |---|---|
-| `C-c C-a` | Apply the edit, with point on the proposal (one undo step) |
+| `C-c C-a` | Apply the hunk (one undo step) and move to the next |
 | `C-c C-k` | Reject it; you can tell Claude why |
+| `C-u C-c C-a`, `C-u C-c C-k` | The same for every hunk of the edit |
+| `n`, `p` | On the hunk's own text: the next or previous hunk |
 
-The chat shows the same proposal as a block, where `y` applies it, `n`
-rejects it, `d` rejects it with a note and `RET` shows it. `M-x
-claude-pair-review-apply` and `M-x claude-pair-review-reject` work from
-anywhere.
+Claude hears what happened to every hunk, with your notes, once the last
+one is decided. The chat shows the edit as a block with its number of
+hunks, where `y` applies all of them, `n` rejects all, `d` rejects all with
+a note and `RET` shows the first hunk. Changes at most
+`claude-pair-review-merge-gap` unchanged lines apart (2) make one hunk.
 
-An applied edit is saved when the buffer had no unsaved changes of yours
+An applied hunk is saved when the buffer had no unsaved changes of yours
 (`claude-pair-review-autosave`). Otherwise it stays unsaved, and Claude is
 told that commands reading the file from disk still see the old version.
 Edits are checked against the live buffer, unsaved changes included, with

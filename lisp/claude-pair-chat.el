@@ -907,20 +907,46 @@ block until it is resolved.  EXTRA is a plist kept with the block."
 
 (defun claude-pair-chat--draw-edit (update)
   "Add the proposed edit in UPDATE to the transcript."
-  (let ((id (plist-get update :requestId)))
+  (let* ((id (plist-get update :requestId))
+         (total (cdr (claude-pair-review-hunk-count id)))
+         (all (if (and total (> total 1)) " all" "")))
     (claude-pair-chat--draw-question
      id
-     (propertize (format "  ✎ Claude wants to %s %s\n"
+     (propertize (format "  ✎ Claude wants to %s %s%s\n"
                          (if (equal (plist-get update :editKind) "write") "write" "edit")
-                         (plist-get update :relPath))
+                         (plist-get update :relPath)
+                         (if (and total (> total 1)) (format " · %d hunks" total) ""))
                  'face 'claude-pair-chat-ask)
      (if (claude-pair-review-pending-p id)
-         (concat "    " (claude-pair-chat--key "y") " apply   "
-                 (claude-pair-chat--key "n") " reject   "
-                 (claude-pair-chat--key "d") " reject with a reason   "
-                 (claude-pair-chat--key "RET") " show")
+         (concat "    " (claude-pair-chat--key "y") " apply" all "   "
+                 (claude-pair-chat--key "n") " reject" all "   "
+                 (claude-pair-chat--key "d") " reject" all " with a reason   "
+                 (claude-pair-chat--key "RET") (if (string-empty-p all) " show" " show, decide hunk by hunk"))
        (propertize "    Waiting for review…" 'face 'claude-pair-chat-meta))
      claude-pair-chat-edit-map 'claude-pair-edit)))
+
+(defun claude-pair-chat--partial-text (update)
+  "Describe the hunk by hunk outcome in UPDATE, one line per hunk not applied."
+  (let* ((hunks (append (plist-get update :hunks) nil))
+         (applied (seq-count (lambda (h) (equal (plist-get h :decision) "applied")) hunks)))
+    (concat
+     (propertize (format "    ◐ Applied %d of %d hunks%s" applied (length hunks)
+                         (cond ((zerop applied) "")
+                               ((eq (plist-get update :saved) t) ", saved")
+                               (t ", not saved: the buffer has unsaved changes of yours")))
+                 'face 'claude-pair-chat-tool)
+     (mapconcat
+      (lambda (h)
+        (let ((note (plist-get h :note)))
+          (propertize
+           (format "\n      ✗ hunk %d (line %d) %s%s" (plist-get h :index) (plist-get h :line)
+                   (if (equal (plist-get h :decision) "rejected") "rejected" "not applied")
+                   (if (and (stringp note) (not (string-empty-p note)))
+                       (concat ": " (car (split-string note "\n")))
+                     ""))
+           'face 'claude-pair-chat-tool-error)))
+      (seq-remove (lambda (h) (equal (plist-get h :decision) "applied")) hunks)
+      ""))))
 
 (defun claude-pair-chat--draw-edit-done (update)
   "Replace the keys of the edit UPDATE settles with the outcome."
@@ -936,6 +962,8 @@ block until it is resolved.  EXTRA is a plist kept with the block."
        ("rejected"
         (propertize (if (string-empty-p message) "    ✗ Rejected" (format "    ✗ Rejected: %s" message))
                     'face 'claude-pair-chat-tool-error))
+       ("partial"
+        (claude-pair-chat--partial-text update))
        ("error"
         (propertize (format "    ✗ Not applied: %s" (car (split-string message "\n")))
                     'face 'claude-pair-chat-tool-error))

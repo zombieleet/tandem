@@ -24,19 +24,24 @@
 ;;; Commentary:
 
 ;; Claude never writes your files directly.  Its edit tools send each
-;; change here, and it appears in the file's buffer as a proposal: the
-;; text to go struck through, and the new text below it as real text you
-;; can move through and read, fontified by the buffer's mode.  The new
-;; text is for display only: it leaves no undo record, does not mark the
-;; buffer modified, and is taken out while the buffer is saved, so saving
-;; writes only your text.  Both texts are read-only until you decide:
+;; change here, and it appears in the file's buffer as a proposal, split
+;; into hunks: the blocks of lines that change, with the unchanged lines
+;; between them left alone.  In each hunk the text to go is struck
+;; through and the new text sits below it as real text you can move
+;; through and read, fontified by the buffer's mode.  The new text is for
+;; display only: it leaves no undo record, does not mark the buffer
+;; modified, and is taken out while the buffer is saved, so saving writes
+;; only your text.  Both texts are read-only until you decide, hunk by
+;; hunk, with point on one:
 ;;
-;;   C-c C-a   apply the edit (one undo step)
+;;   C-c C-a   apply the hunk (one undo step)
 ;;   C-c C-k   reject it, optionally telling Claude why
+;;   C-u       before either: the same for every hunk of the edit
+;;   n, p      on the hunk's text: the next or previous hunk
 ;;
-;; with point on the proposal, or y and n on its block in the chat.  An
-;; applied edit is saved when the buffer had no unsaved changes of yours;
-;; otherwise it stays unsaved, and Claude is told so.
+;; or y and n on the edit's block in the chat, for every hunk at once.  An
+;; applied hunk is saved when the buffer had no unsaved changes of yours.
+;; Claude hears the outcome of every hunk once the last one is decided.
 ;;
 ;; The change is checked against the live buffer, unsaved changes
 ;; included, with the same rules and messages as Claude Code's built-in
@@ -44,6 +49,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'claude-pair-layout)
 (require 'claude-pair-rpc)
 (require 'seq)
@@ -54,6 +60,11 @@
 Even when non-nil, a buffer is saved only if it had no unsaved
 changes of yours, so nothing of yours is ever saved behind your back."
   :type 'boolean
+  :group 'claude-pair)
+
+(defcustom claude-pair-review-merge-gap 2
+  "Unchanged lines between two changes up to which they make one hunk."
+  :type 'natnum
   :group 'claude-pair)
 
 (defface claude-pair-review-removed
@@ -68,20 +79,47 @@ changes of yours, so nothing of yours is ever saved behind your back."
 
 (defface claude-pair-review-banner
   '((t :inherit warning :weight bold :extend t))
-  "Face for the line above a proposed edit."
+  "Face for the line above a proposed hunk."
   :group 'claude-pair)
 
 (defvar claude-pair-review--proposals (make-hash-table :test #'equal)
-  "Map from edit request id to its proposal plist.")
+  "Map from edit request id to its proposal plist.
+A proposal has :id, :buffer, :path, :kind, :session, :new-file and
+:hunks, a list of `claude-pair-review--hunk' in buffer order.")
 
-(defvar-keymap claude-pair-review-proposal-map
-  :doc "Keys on a proposed edit in a file buffer."
-  "C-c C-a" #'claude-pair-review-apply
-  "C-c C-k" #'claude-pair-review-reject)
+(cl-defstruct (claude-pair-review--hunk
+               (:constructor claude-pair-review--make-hunk)
+               (:copier nil))
+  "One block of changed lines in a proposed edit."
+  id         ; the edit's request id
+  index      ; 1-based, in buffer order
+  beg end    ; markers around the text the hunk replaces
+  old new    ; that text, and what replaces it
+  line       ; the line where the hunk started when Claude proposed it
+  entry      ; (START END TEXT OVERLAY) of the new text, or nil
+  overlays   ; every overlay drawn for it
+  banner region
+  (state 'pending)  ; pending, applied, rejected or error
+  note saved)
+
+(defvar-keymap claude-pair-review-hunk-map
+  :doc "Keys on the lines of a proposed hunk."
+  "C-c C-a" #'claude-pair-review-apply-hunk
+  "C-c C-k" #'claude-pair-review-reject-hunk)
+
+(defvar-keymap claude-pair-review-hunk-text-map
+  :doc "Keys on a hunk's own text, which you cannot type into anyway."
+  :parent claude-pair-review-hunk-map
+  "n" #'claude-pair-review-next-hunk
+  "p" #'claude-pair-review-previous-hunk)
 
 (defconst claude-pair-review--locked-message
-  "Claude proposed changing this text: C-c C-a applies the edit, C-c C-k rejects it"
+  "Claude proposed changing this text: C-c C-a applies the hunk, C-c C-k rejects it"
   "Error shown when you type into text a proposal would replace.")
+
+(defconst claude-pair-review--changed-message
+  "The text to replace changed in Emacs while the user was reviewing the edit.  Read the file again."
+  "What Claude is told when the text under its edit changed.")
 
 ;;;; Helpers
 
@@ -178,52 +216,55 @@ modified flag stays as it was."
              claude-pair-review--proposals)
     found))
 
-(defun claude-pair-review--changed-p (proposal)
-  "Return non-nil if the text under PROPOSAL is not what Claude saw.
-Call it while the proposal's own text is out of the buffer."
-  (seq-find (lambda (occ)
-              (not (equal (buffer-substring-no-properties (nth 0 occ) (nth 1 occ))
-                          (nth 2 occ))))
-            (plist-get proposal :occurrences)))
+(defun claude-pair-review--pending (proposal)
+  "Return PROPOSAL's hunks that wait for a decision."
+  (seq-filter (lambda (hunk) (eq (claude-pair-review--hunk-state hunk) 'pending))
+              (plist-get proposal :hunks)))
 
-(defun claude-pair-review--all-hidden-p (proposal)
-  "Return non-nil if none of PROPOSAL's text is in the buffer."
-  (seq-every-p (lambda (entry) (= (nth 0 entry) (nth 1 entry)))
-               (plist-get proposal :entries)))
+(defun claude-pair-review--hunk-changed-p (hunk)
+  "Return non-nil if the text under HUNK is not what Claude saw.
+Call it while the hunk's own new text is out of the buffer."
+  (not (equal (buffer-substring-no-properties (claude-pair-review--hunk-beg hunk)
+                                              (claude-pair-review--hunk-end hunk))
+              (claude-pair-review--hunk-old hunk))))
+
+(defun claude-pair-review--hunk-hidden-p (hunk)
+  "Return non-nil if HUNK's new text is out of the buffer."
+  (let ((entry (claude-pair-review--hunk-entry hunk)))
+    (or (null entry) (= (nth 0 entry) (nth 1 entry)))))
 
 (defun claude-pair-review--hide (buffer)
-  "Take the proposed text of every proposal out of BUFFER."
+  "Take the proposed text of every pending hunk out of BUFFER."
   (with-current-buffer buffer
     (unless claude-pair-review--hidden
       (setq claude-pair-review--hidden t)
       (dolist (proposal (claude-pair-review--in-buffer buffer))
-        (mapc #'claude-pair-review--hide-text (plist-get proposal :entries))))))
+        (dolist (hunk (claude-pair-review--pending proposal))
+          (when-let* ((entry (claude-pair-review--hunk-entry hunk)))
+            (claude-pair-review--hide-text entry)))))))
 
 (defun claude-pair-review--unhide (buffer)
   "Put the proposed text back into BUFFER.
-A proposal whose text changed meanwhile, say by a save hook that
-reformats the file, is dropped and Claude is told."
+A hunk whose text changed meanwhile, say by a save hook that reformats
+the file, is dropped, and Claude hears it with the edit's outcome."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (when claude-pair-review--hidden
         (setq claude-pair-review--hidden nil)
         (dolist (proposal (claude-pair-review--in-buffer buffer))
-          (if (and (claude-pair-review--all-hidden-p proposal)
-                   (claude-pair-review--changed-p proposal))
-              (claude-pair-review--drop proposal claude-pair-review--changed-message)
-            (mapc #'claude-pair-review--show-text (plist-get proposal :entries))
-            (claude-pair-review--place proposal)))))))
-
-(defconst claude-pair-review--changed-message
-  "The text to replace changed in Emacs while the user was reviewing the edit.  Read the file again."
-  "What Claude is told when the text under its edit changed.")
-
-(defun claude-pair-review--drop (proposal reason)
-  "Remove PROPOSAL and tell Claude it was not applied, for REASON."
-  (claude-pair-review--clear proposal)
-  (claude-pair-review--answer (plist-get proposal :id) "error" :message reason)
-  (message "claude-pair: Claude's edit to %s was dropped: %s"
-           (file-name-nondirectory (plist-get proposal :path)) reason))
+          (let ((dropped nil))
+            (dolist (hunk (claude-pair-review--pending proposal))
+              (if (and (claude-pair-review--hunk-hidden-p hunk)
+                       (claude-pair-review--hunk-changed-p hunk))
+                  (progn (claude-pair-review--settle hunk 'error claude-pair-review--changed-message)
+                         (setq dropped t))
+                (when-let* ((entry (claude-pair-review--hunk-entry hunk)))
+                  (claude-pair-review--show-text entry))
+                (claude-pair-review--place hunk)))
+            ;; Only for hunks dropped here: an edit being applied, whose
+            ;; save ran this, finishes itself once it knows what was saved.
+            (when dropped
+              (claude-pair-review--maybe-finish proposal))))))))
 
 (defun claude-pair-review--before-save ()
   "Take the proposed text out, so saving writes only your text."
@@ -239,10 +280,12 @@ reformats the file, is dropped and Claude is told."
 (put 'claude-pair-review--after-save 'permanent-local-hook t)
 
 (defun claude-pair-review--before-revert ()
-  "Drop the proposals in a buffer about to be reloaded from disk."
+  "Drop the hunks waiting in a buffer about to be reloaded from disk."
   (dolist (proposal (claude-pair-review--in-buffer (current-buffer)))
-    (claude-pair-review--drop
-     proposal "The file was reloaded from disk in Emacs while the user was reviewing the edit.  Read it again.")))
+    (dolist (hunk (claude-pair-review--pending proposal))
+      (claude-pair-review--settle
+       hunk 'error "The file was reloaded from disk in Emacs while the user was reviewing the edit.  Read it again."))
+    (claude-pair-review--maybe-finish proposal)))
 (put 'claude-pair-review--before-revert 'permanent-local-hook t)
 
 (defun claude-pair-review--conflicts-p (kind found)
@@ -252,13 +295,19 @@ FOUND is a list of (BEG . END) ranges."
    (lambda (other)
      (or (eq kind 'write)
          (eq (plist-get other :kind) 'write)
-         (seq-some (lambda (occ)
-                     (let ((b (min (nth 0 occ) (nth 1 occ)))
-                           (e (max (nth 0 occ) (nth 1 occ))))
-                       (seq-some (lambda (range) (and (< (car range) e) (< b (cdr range))))
+         (seq-some (lambda (hunk)
+                     (let* ((beg (claude-pair-review--hunk-beg hunk))
+                            (end (claude-pair-review--hunk-end hunk))
+                            (b (min beg end)) (e (max beg end)))
+                       (seq-some (lambda (range)
+                                   (or (and (< (car range) e) (< b (cdr range)))
+                                       ;; An insertion inside the range.
+                                       (and (= b e) (< (car range) b (cdr range)))))
                                  found)))
-                   (plist-get other :occurrences))))
+                   (claude-pair-review--pending other))))
    (claude-pair-review--in-buffer (current-buffer))))
+
+;;;; Hunks
 
 (defun claude-pair-review--lines (string)
   "Split STRING into a vector of lines, each keeping its newline."
@@ -270,22 +319,102 @@ FOUND is a list of (BEG . END) ranges."
       (push (substring string start) lines))
     (vconcat (nreverse lines))))
 
-(defun claude-pair-review--trim (old new)
-  "Return (PREFIX SUFFIX MIDDLE) for showing OLD replaced by NEW.
-PREFIX and SUFFIX are the lengths of the whole lines OLD and NEW share
-at their start and end; MIDDLE is the part of NEW between them."
-  (let* ((ol (claude-pair-review--lines old))
-         (nl (claude-pair-review--lines new))
-         (on (length ol)) (nn (length nl))
-         (i 0) (j 0))
-    (while (and (< i on) (< i nn) (equal (aref ol i) (aref nl i)))
-      (setq i (1+ i)))
-    (while (and (< j (- on i)) (< j (- nn i))
-                (equal (aref ol (- on 1 j)) (aref nl (- nn 1 j))))
-      (setq j (1+ j)))
-    (list (apply #'+ (mapcar #'length (seq-subseq ol 0 i)))
-          (apply #'+ (mapcar #'length (seq-subseq ol (- on j))))
-          (apply #'concat (append (seq-subseq nl i (- nn j)) nil)))))
+(defconst claude-pair-review--diff-limit 400
+  "Most line edits the diff looks for before making the rest one hunk.")
+
+(defun claude-pair-review--diff (a b)
+  "Return how line vector A becomes line vector B, as changed ranges.
+Each range is (OI OJ NI NJ): A's lines OI to OJ-1 become B's lines NI
+to NJ-1.  Lines outside the ranges are equal, in the same order."
+  (let* ((n (length a)) (m (length b)) (p 0) (s 0))
+    (while (and (< p n) (< p m) (equal (aref a p) (aref b p)))
+      (setq p (1+ p)))
+    (while (and (< s (- n p)) (< s (- m p))
+                (equal (aref a (- n 1 s)) (aref b (- m 1 s))))
+      (setq s (1+ s)))
+    (claude-pair-review--myers a p (- n s) b p (- m s))))
+
+(defun claude-pair-review--myers (a ao an b bo bm)
+  "Return the changed ranges between two spans of lines.
+The spans are the lines of vector A from AO up to AN, and of vector B
+from BO up to BM, the ends excluded.  This is Myers' O(ND) algorithm;
+past `claude-pair-review--diff-limit' edits the whole span is one range."
+  (let ((n (- an ao)) (m (- bm bo)))
+    (cond
+     ((and (zerop n) (zerop m)) nil)
+     ((or (zerop n) (zerop m)) (list (list ao an bo bm)))
+     (t
+      (let* ((limit (min (+ n m) claude-pair-review--diff-limit))
+             (off (1+ limit))
+             (v (make-vector (+ (* 2 limit) 3) 0))
+             (trace nil)
+             (found nil)
+             (d 0))
+        (while (and (not found) (<= d limit))
+          (push (copy-sequence v) trace)
+          (let ((k (- d)))
+            (while (and (not found) (<= k d))
+              (let* ((x (if (or (= k (- d))
+                                (and (/= k d) (< (aref v (+ off k -1)) (aref v (+ off k 1)))))
+                            (aref v (+ off k 1))
+                          (1+ (aref v (+ off k -1)))))
+                     (y (- x k)))
+                (while (and (< x n) (< y m) (equal (aref a (+ ao x)) (aref b (+ bo y))))
+                  (setq x (1+ x) y (1+ y)))
+                (aset v (+ off k) x)
+                (when (and (>= x n) (>= y m))
+                  (setq found t)))
+              (setq k (+ k 2))))
+          (unless found (setq d (1+ d))))
+        (if (not found)
+            (list (list ao an bo bm))
+          ;; Walk back through the snapshots, collecting the equal pairs.
+          (let ((x n) (y m) (pairs nil))
+            (dolist (snapshot trace)
+              (let* ((k (- x y))
+                     (prev-k (if (or (= k (- d))
+                                     (and (/= k d) (< (aref snapshot (+ off k -1))
+                                                      (aref snapshot (+ off k 1)))))
+                                 (1+ k)
+                               (1- k)))
+                     (prev-x (aref snapshot (+ off prev-k)))
+                     (prev-y (- prev-x prev-k)))
+                (while (and (> x prev-x) (> y prev-y))
+                  (setq x (1- x) y (1- y))
+                  (push (cons x y) pairs))
+                (setq x prev-x y prev-y d (1- d))))
+            ;; The gaps between equal pairs are the changes.
+            (let ((i 0) (j 0) (ranges nil))
+              (dolist (pair pairs)
+                (when (or (> (car pair) i) (> (cdr pair) j))
+                  (push (list (+ ao i) (+ ao (car pair)) (+ bo j) (+ bo (cdr pair))) ranges))
+                (setq i (1+ (car pair)) j (1+ (cdr pair))))
+              (when (or (< i n) (< j m))
+                (push (list (+ ao i) an (+ bo j) bm) ranges))
+              (nreverse ranges)))))))))
+
+(defun claude-pair-review--merge (ranges gap)
+  "Join RANGES that are at most GAP unchanged lines apart."
+  (let (out)
+    (dolist (r ranges)
+      (if (and out (<= (- (nth 0 r) (nth 1 (car out))) gap))
+          (setcar out (list (nth 0 (car out)) (nth 1 r) (nth 2 (car out)) (nth 3 r)))
+        (push r out)))
+    (nreverse out)))
+
+(defun claude-pair-review--hunk-specs (old new)
+  "Return the hunks that turn OLD into NEW.
+Each is (START END TEXT): OLD's characters START to END-1 become TEXT."
+  (let* ((a (claude-pair-review--lines old))
+         (b (claude-pair-review--lines new))
+         (offsets (make-vector (1+ (length a)) 0)))
+    (dotimes (i (length a))
+      (aset offsets (1+ i) (+ (aref offsets i) (length (aref a i)))))
+    (mapcar (lambda (r)
+              (list (aref offsets (nth 0 r)) (aref offsets (nth 1 r))
+                    (apply #'concat (append (seq-subseq b (nth 2 r) (nth 3 r)) nil))))
+            (claude-pair-review--merge (claude-pair-review--diff a b)
+                                       claude-pair-review-merge-gap))))
 
 (defun claude-pair-review--occurrences (old)
   "Return the (BEG . END) of every exact occurrence of OLD in the buffer."
@@ -299,14 +428,17 @@ at their start and end; MIDDLE is the part of NEW between them."
         (nreverse found)))))
 
 (defun claude-pair-review--answer (id outcome &rest fields)
-  "Tell the daemon how edit ID ended: OUTCOME, plus FIELDS."
+  "Tell the daemon how edit ID ended: OUTCOME, plus FIELDS.
+FIELDS may hold :message, :saved, :created and :hunks."
   (let ((message (or (plist-get fields :message) "")))
     (condition-case err
         (claude-pair-rpc-request
          'edit/answer
-         (list :requestId id :outcome outcome :message message
-               :saved (if (plist-get fields :saved) t :json-false)
-               :created (if (plist-get fields :created) t :json-false)))
+         (append (list :requestId id :outcome outcome :message message
+                       :saved (if (plist-get fields :saved) t :json-false)
+                       :created (if (plist-get fields :created) t :json-false))
+                 (when (plist-get fields :hunks)
+                   (list :hunks (vconcat (plist-get fields :hunks))))))
       (jsonrpc-error
        (message "claude-pair: %s" (claude-pair-rpc-error-message err)))
       (error
@@ -393,104 +525,259 @@ please provide more context to uniquely identify the instance.\nString: %s"
           (claude-pair-review--unhide buffer))))))
 
 (defun claude-pair-review--show-proposal (id path params check)
-  "Draw proposal ID for PATH in the current buffer.
-PARAMS is the request; CHECK is what `claude-pair-review--check' returned.
-The text to go is struck through; the new text goes in below it as real,
-read-only text, so it can be scrolled through and read like code."
+  "Draw proposal ID for PATH in the current buffer, hunk by hunk.
+PARAMS is the request; CHECK is what `claude-pair-review--check' returned."
   (pcase-let* ((`(,kind ,found ,new) check)
-               (overlays nil)
-               (occurrences nil)
-               (entries nil))
-    (dolist (range (reverse found))
-      ;; From the last occurrence back, so earlier positions stay valid.
-      (let* ((beg (car range)) (end (cdr range))
-             (old (buffer-substring-no-properties beg end))
-             ;; Markers first, so the text added below moves them correctly.
-             (occurrence (list (copy-marker beg t) (copy-marker end) old new)))
-        (pcase-let ((`(,prefix ,suffix ,middle) (claude-pair-review--trim old new)))
-          (let ((rb (+ beg prefix)) (re (- end suffix)))
-            (claude-pair-review--lock beg end)
-            (when (< rb re)
-              (let ((ov (make-overlay rb re nil t nil)))
-                (overlay-put ov 'face 'claude-pair-review-removed)
-                (push ov overlays)))
-            (unless (string-empty-p middle)
-              (let ((entry (list (copy-marker re t) (copy-marker re) middle
-                                 (make-overlay re re nil t nil))))
-                (overlay-put (nth 3 entry) 'face 'claude-pair-review-added)
-                (claude-pair-review--show-text entry)
-                (push (nth 3 entry) overlays)
-                (push entry entries)))
-            (push occurrence occurrences)))))
-    (let* ((banner (make-overlay (point-min) (point-min)))
-           (region (make-overlay (point-min) (point-min)))
-           (proposal (list :id id :buffer (current-buffer) :path path :kind kind
-                           :session (plist-get params :sessionId)
-                           :occurrences occurrences :entries entries
-                           :banner banner :region region
-                           :overlays (append (list banner region) overlays)
-                           :new-file (not (file-exists-p path)))))
-      (overlay-put banner 'before-string
-                   (propertize (format "▸ Claude proposes %s%s · C-c C-a applies · C-c C-k rejects\n"
-                                       (if (eq kind 'write)
-                                           (if (file-exists-p path) "new content for this file" "this new file")
-                                         "an edit")
-                                       (if (cdr found) (format " (%d places)" (length found)) ""))
-                               'face 'claude-pair-review-banner))
-      (overlay-put region 'keymap claude-pair-review-proposal-map)
-      (overlay-put region 'claude-pair-proposal id)
-      (claude-pair-review--place proposal)
-      (puthash id proposal claude-pair-review--proposals)
-      (add-hook 'kill-buffer-hook #'claude-pair-review--on-kill nil t)
-      (add-hook 'before-save-hook #'claude-pair-review--before-save -100 t)
-      (add-hook 'after-save-hook #'claude-pair-review--after-save 100 t)
-      (add-hook 'before-revert-hook #'claude-pair-review--before-revert nil t)
-      ;; Where the chat is, else in the selected frame: Claude is waiting for you.
-      ;; Where the chat is.  When it is not shown, Claude is waiting for
-      ;; you, so show it where you are, unless you are in another tab than
-      ;; Claude's: your tabs are never touched.
-      (claude-pair-layout-show (current-buffer) :pos (overlay-start banner)
-                               :session (plist-get params :sessionId)
-                               :fallback (not (claude-pair-layout-elsewhere-p)))
-      (message "claude-pair: Claude proposes an edit to %s%s; C-c C-a applies it, C-c C-k rejects it"
-               (file-name-nondirectory path) (claude-pair-layout-where-text)))))
+               (specs nil))
+    (dolist (range found)
+      (let ((old (buffer-substring-no-properties (car range) (cdr range))))
+        (dolist (spec (claude-pair-review--hunk-specs old new))
+          (push (list (+ (car range) (nth 0 spec)) (+ (car range) (nth 1 spec)) (nth 2 spec))
+                specs))))
+    (setq specs (nreverse specs))
+    (if (null specs)
+        (claude-pair-review--answer id "error" :message "No changes to make: the file already has this text.")
+      (let* ((index 0)
+             ;; Markers for every hunk first, so text added for one moves the others.
+             (hunks (mapcar (lambda (spec)
+                              (claude-pair-review--make-hunk
+                               :id id :index (setq index (1+ index))
+                               :beg (copy-marker (nth 0 spec) t) :end (copy-marker (nth 1 spec))
+                               :old (buffer-substring-no-properties (nth 0 spec) (nth 1 spec))
+                               :new (nth 2 spec)
+                               :line (line-number-at-pos (nth 0 spec) t)))
+                            specs))
+             (proposal (list :id id :buffer (current-buffer) :path path :kind kind
+                             :session (plist-get params :sessionId) :hunks hunks
+                             :new-file (not (file-exists-p path)))))
+        (puthash id proposal claude-pair-review--proposals)
+        (dolist (hunk hunks)
+          (claude-pair-review--draw hunk proposal))
+        (add-hook 'kill-buffer-hook #'claude-pair-review--on-kill nil t)
+        (add-hook 'before-save-hook #'claude-pair-review--before-save -100 t)
+        (add-hook 'after-save-hook #'claude-pair-review--after-save 100 t)
+        (add-hook 'before-revert-hook #'claude-pair-review--before-revert nil t)
+        ;; Where the chat is.  When it is not shown, Claude is waiting for
+        ;; you, so show it where you are, unless you are in another tab than
+        ;; Claude's: your tabs are never touched.
+        (claude-pair-layout-show (current-buffer)
+                                 :pos (overlay-start (claude-pair-review--hunk-banner (car hunks)))
+                                 :session (plist-get params :sessionId)
+                                 :fallback (not (claude-pair-layout-elsewhere-p)))
+        (message "claude-pair: Claude proposes an edit to %s%s%s; C-c C-a applies a hunk, C-c C-k rejects it"
+                 (file-name-nondirectory path)
+                 (if (cdr hunks) (format " (%d hunks)" (length hunks)) "")
+                 (claude-pair-layout-where-text))))))
 
-(defun claude-pair-review--place (proposal)
-  "Fit PROPOSAL's banner and its key overlay around its text."
-  (let* ((occurrences (plist-get proposal :occurrences))
-         (entries (plist-get proposal :entries))
+(defun claude-pair-review--banner-text (hunk proposal)
+  "Return the line shown above HUNK of PROPOSAL."
+  (let ((total (length (plist-get proposal :hunks))))
+    (propertize
+     (if (> total 1)
+         ;; Short enough not to wrap in a window of 80 columns.
+         (format "▸ Claude · hunk %d of %d · C-c C-a apply · C-c C-k reject · n/p move\n"
+                 (claude-pair-review--hunk-index hunk) total)
+       (format "▸ Claude proposes %s · C-c C-a applies · C-c C-k rejects\n"
+               (if (eq (plist-get proposal :kind) 'write)
+                   (if (plist-get proposal :new-file) "this new file" "new content for this file")
+                 "an edit")))
+     'face 'claude-pair-review-banner)))
+
+(defun claude-pair-review--draw (hunk proposal)
+  "Draw HUNK of PROPOSAL: lock and strike its old text, show its new text."
+  (let ((beg (claude-pair-review--hunk-beg hunk))
+        (end (claude-pair-review--hunk-end hunk))
+        (new (claude-pair-review--hunk-new hunk))
+        (overlays nil))
+    (claude-pair-review--lock beg end)
+    (when (< beg end)
+      (let ((ov (make-overlay beg end nil t nil)))
+        (overlay-put ov 'face 'claude-pair-review-removed)
+        (overlay-put ov 'keymap claude-pair-review-hunk-text-map)
+        (overlay-put ov 'priority 1)
+        (overlay-put ov 'claude-pair-hunk hunk)
+        (push ov overlays)))
+    (unless (string-empty-p new)
+      (let* ((pos (marker-position end))
+             (entry (list (copy-marker pos t) (copy-marker pos) new (make-overlay pos pos nil t nil))))
+        (overlay-put (nth 3 entry) 'face 'claude-pair-review-added)
+        (overlay-put (nth 3 entry) 'keymap claude-pair-review-hunk-text-map)
+        (overlay-put (nth 3 entry) 'priority 1)
+        (overlay-put (nth 3 entry) 'claude-pair-hunk hunk)
+        (setf (claude-pair-review--hunk-entry hunk) entry)
+        (claude-pair-review--show-text entry)
+        (push (nth 3 entry) overlays)))
+    (let ((banner (make-overlay beg beg))
+          (region (make-overlay beg beg)))
+      (overlay-put banner 'before-string (claude-pair-review--banner-text hunk proposal))
+      (overlay-put region 'keymap claude-pair-review-hunk-map)
+      (overlay-put region 'claude-pair-hunk hunk)
+      (overlay-put region 'claude-pair-proposal (plist-get proposal :id))
+      (setf (claude-pair-review--hunk-banner hunk) banner
+            (claude-pair-review--hunk-region hunk) region
+            (claude-pair-review--hunk-overlays hunk) (append (list banner region) overlays)))
+    (claude-pair-review--place hunk)))
+
+(defun claude-pair-review--place (hunk)
+  "Fit HUNK's banner and its key overlay around its text."
+  (let* ((entry (claude-pair-review--hunk-entry hunk))
          (positions (mapcar #'marker-position
-                            (append (mapcar #'car occurrences) (mapcar #'cadr occurrences)
-                                    (mapcar #'car entries) (mapcar #'cadr entries))))
+                            (append (list (claude-pair-review--hunk-beg hunk)
+                                          (claude-pair-review--hunk-end hunk))
+                                    (and entry (list (nth 0 entry) (nth 1 entry))))))
          (bol (save-excursion (goto-char (apply #'min positions)) (line-beginning-position)))
          (eol (save-excursion (goto-char (apply #'max positions))
                               (if (and (bolp) (> (point) bol)) (point) (line-end-position)))))
-    (move-overlay (plist-get proposal :banner) bol bol)
-    (move-overlay (plist-get proposal :region) bol eol)))
+    (move-overlay (claude-pair-review--hunk-banner hunk) bol bol)
+    (move-overlay (claude-pair-review--hunk-region hunk) bol eol)))
 
 ;;;; Deciding
 
-(defun claude-pair-review--clear (proposal &optional keep-markers)
-  "Remove PROPOSAL from its buffer: its text, overlays and locks.
-With KEEP-MARKERS, leave the markers on the text it replaces."
+(defun claude-pair-review--settle (hunk state &optional note)
+  "Take HUNK's display out of its buffer and record STATE and NOTE."
+  (when (eq (claude-pair-review--hunk-state hunk) 'pending)
+    (let ((beg (claude-pair-review--hunk-beg hunk))
+          (end (claude-pair-review--hunk-end hunk))
+          (entry (claude-pair-review--hunk-entry hunk)))
+      (when (and (marker-buffer beg) (buffer-live-p (marker-buffer beg)))
+        (with-current-buffer (marker-buffer beg)
+          (when entry
+            (claude-pair-review--hide-text entry))
+          (claude-pair-review--unlock (min beg end) (max beg end))))
+      (when entry
+        (set-marker (nth 0 entry) nil)
+        (set-marker (nth 1 entry) nil))
+      (mapc #'delete-overlay (claude-pair-review--hunk-overlays hunk))
+      (setf (claude-pair-review--hunk-state hunk) state
+            (claude-pair-review--hunk-note hunk) note))))
+
+(defun claude-pair-review--free (hunk)
+  "Free HUNK's markers once it is decided."
+  (set-marker (claude-pair-review--hunk-beg hunk) nil)
+  (set-marker (claude-pair-review--hunk-end hunk) nil))
+
+(defun claude-pair-review--clear (proposal)
+  "Remove PROPOSAL without answering: its text, overlays and locks."
   (remhash (plist-get proposal :id) claude-pair-review--proposals)
-  (let ((buffer (plist-get proposal :buffer)))
-    (when (buffer-live-p buffer)
-      (with-current-buffer buffer
-        (dolist (entry (plist-get proposal :entries))
-          (claude-pair-review--hide-text entry)
-          (set-marker (nth 0 entry) nil)
-          (set-marker (nth 1 entry) nil))
-        (dolist (occ (plist-get proposal :occurrences))
-          (claude-pair-review--unlock (nth 0 occ) (nth 1 occ))
-          (unless keep-markers
-            (set-marker (nth 0 occ) nil)
-            (set-marker (nth 1 occ) nil))))))
-  (mapc #'delete-overlay (plist-get proposal :overlays)))
+  (dolist (hunk (plist-get proposal :hunks))
+    (claude-pair-review--settle hunk 'withdrawn)
+    (claude-pair-review--free hunk)))
+
+(defun claude-pair-review--save (proposal)
+  "Save PROPOSAL's buffer, making a new file's directory first."
+  (when (plist-get proposal :new-file)
+    (make-directory (file-name-directory (plist-get proposal :path)) t))
+  (let ((save-silently t) (inhibit-message t))
+    (save-buffer)))
+
+(defun claude-pair-review--apply-one (hunk proposal &optional no-save)
+  "Apply HUNK of PROPOSAL as one undo step, then save if the buffer was clean.
+With NO-SAVE, leave saving to the caller.  Return non-nil if applied."
+  (with-current-buffer (plist-get proposal :buffer)
+    (let ((clean (not (buffer-modified-p)))
+          (beg (claude-pair-review--hunk-beg hunk))
+          (end (claude-pair-review--hunk-end hunk)))
+      (when-let* ((entry (claude-pair-review--hunk-entry hunk)))
+        (claude-pair-review--hide-text entry))
+      (cond
+       ((claude-pair-review--hunk-changed-p hunk)
+        (claude-pair-review--settle hunk 'error claude-pair-review--changed-message)
+        nil)
+       (t
+        ;; Whatever happens, the hunk gets a decision, or Claude waits forever.
+        (condition-case err
+            (let ((start (marker-position beg))
+                  (stop (marker-position end)))
+              (claude-pair-review--settle hunk 'applied)
+              (claude-pair-review--replace start stop (claude-pair-review--hunk-new hunk))
+              (when (and claude-pair-review-autosave clean (not no-save))
+                (claude-pair-review--save proposal)
+                (setf (claude-pair-review--hunk-saved hunk) t))
+              t)
+          (error
+           (setf (claude-pair-review--hunk-state hunk) 'error
+                 (claude-pair-review--hunk-note hunk)
+                 (format "Emacs could not apply %s: %s"
+                         (if (cdr (plist-get proposal :hunks))
+                             (format "hunk %d" (claude-pair-review--hunk-index hunk))
+                           "the edit")
+                         (error-message-string err)))
+           nil)))))))
+
+(defun claude-pair-review--replace (beg end text)
+  "Replace BEG..END with TEXT as a single undo step."
+  (let ((group (prepare-change-group))
+        (done nil))
+    (unwind-protect
+        (progn
+          (activate-change-group group)
+          (save-excursion
+            (goto-char beg)
+            (delete-region beg end)
+            (insert text))
+          (setq done t))
+      (if done
+          (accept-change-group group)
+        (cancel-change-group group))
+      (undo-amalgamate-change-group group))))
+
+(defun claude-pair-review--hunk-report (hunk)
+  "Describe HUNK's decision for the daemon."
+  (let ((note (claude-pair-review--hunk-note hunk)))
+    (list :index (claude-pair-review--hunk-index hunk)
+          :line (claude-pair-review--hunk-line hunk)
+          :oldLines (length (claude-pair-review--lines (claude-pair-review--hunk-old hunk)))
+          :newLines (length (claude-pair-review--lines (claude-pair-review--hunk-new hunk)))
+          :decision (symbol-name (claude-pair-review--hunk-state hunk))
+          :note (or note "")
+          :saved (if (claude-pair-review--hunk-saved hunk) t :json-false))))
+
+(defun claude-pair-review--maybe-finish (proposal)
+  "Tell Claude how PROPOSAL ended, once no hunk of it waits."
+  (when (and (gethash (plist-get proposal :id) claude-pair-review--proposals)
+             (null (claude-pair-review--pending proposal)))
+    (remhash (plist-get proposal :id) claude-pair-review--proposals)
+    (let* ((id (plist-get proposal :id))
+           (hunks (plist-get proposal :hunks))
+           (states (mapcar #'claude-pair-review--hunk-state hunks))
+           (applied (seq-filter (lambda (h) (eq (claude-pair-review--hunk-state h) 'applied)) hunks))
+           (saved (and applied (seq-every-p #'claude-pair-review--hunk-saved applied)))
+           (name (file-name-nondirectory (plist-get proposal :path)))
+           (notes (delq nil (mapcar (lambda (h)
+                                      (let ((note (claude-pair-review--hunk-note h)))
+                                        (and note (not (string-empty-p note)) note)))
+                                    hunks))))
+      (mapc #'claude-pair-review--free hunks)
+      (cond
+       ((seq-every-p (lambda (s) (eq s 'applied)) states)
+        (claude-pair-review--answer id "applied" :saved saved
+                                    :created (and saved (plist-get proposal :new-file)))
+        (message "claude-pair: applied Claude's edit to %s%s" name
+                 (if saved "" " (not saved: the buffer has unsaved changes of yours)")))
+       ((and (null (cdr hunks)) (eq (car states) 'error))
+        (claude-pair-review--answer id "error" :message (car notes))
+        (message "claude-pair: Claude's edit to %s was not applied: %s" name (car notes)))
+       ((seq-every-p (lambda (s) (eq s 'rejected)) states)
+        (claude-pair-review--answer id "rejected" :message (string-join (seq-uniq notes) "\n")
+                                    :hunks (and (cdr hunks) (mapcar #'claude-pair-review--hunk-report hunks)))
+        (message "claude-pair: rejected Claude's edit to %s" name))
+       (t
+        (claude-pair-review--answer id "partial" :saved saved
+                                    :hunks (mapcar #'claude-pair-review--hunk-report hunks))
+        (message "claude-pair: applied %d of %d hunks of Claude's edit to %s"
+                 (length applied) (length hunks) name))))))
+
+;;;; Commands
+
+(defun claude-pair-review--hunk-at-point ()
+  "Return the pending hunk at point, or nil."
+  (let ((hunk (get-char-property (point) 'claude-pair-hunk)))
+    (and hunk (eq (claude-pair-review--hunk-state hunk) 'pending) hunk)))
 
 (defun claude-pair-review--at-point ()
-  "Return the id of the proposal at point, else one in this buffer, else any."
-  (or (get-char-property (point) 'claude-pair-proposal)
+  "Return the id of the edit at point, else one in this buffer, else any."
+  (or (when-let* ((hunk (claude-pair-review--hunk-at-point)))
+        (claude-pair-review--hunk-id hunk))
       (let (here any)
         (maphash (lambda (id p)
                    (setq any id)
@@ -500,99 +787,133 @@ With KEEP-MARKERS, leave the markers on the text it replaces."
         (or here any))
       (user-error "Claude has no proposed edit waiting")))
 
+(defun claude-pair-review--proposal (id)
+  "Return the waiting proposal ID, or signal a `user-error'."
+  (or (gethash id claude-pair-review--proposals)
+      (user-error "That edit is no longer waiting")))
+
 (defun claude-pair-review-pending-p (id)
   "Return non-nil if edit ID waits for your decision in this Emacs."
   (and (gethash id claude-pair-review--proposals) t))
 
+(defun claude-pair-review-hunk-count (id)
+  "Return (WAITING . TOTAL), the hunks of edit ID, or nil if it is not waiting."
+  (when-let* ((proposal (gethash id claude-pair-review--proposals)))
+    (cons (length (claude-pair-review--pending proposal))
+          (length (plist-get proposal :hunks)))))
+
 (defun claude-pair-review-apply (&optional id)
-  "Apply Claude's proposed edit ID, or the one at point.
-The change is one undo step.  The buffer is saved when it had no
+  "Apply every waiting hunk of Claude's edit ID, or of the edit at point.
+Each hunk is one undo step.  The buffer is saved once, when it had no
 unsaved changes of yours and `claude-pair-review-autosave' is non-nil."
   (interactive)
-  (let* ((id (or id (claude-pair-review--at-point)))
-         (proposal (or (gethash id claude-pair-review--proposals)
-                       (user-error "That edit is no longer waiting")))
-         (buffer (plist-get proposal :buffer))
-         (occurrences (plist-get proposal :occurrences)))
-    (unless (buffer-live-p buffer)
-      (claude-pair-review--clear proposal)
-      (user-error "The buffer for that edit is gone"))
-    (with-current-buffer buffer
-      (claude-pair-review--clear proposal t)
-      (let ((unsaved (buffer-modified-p))
-            (new-file (plist-get proposal :new-file)))
-        (if (claude-pair-review--changed-p proposal)
-            (progn
-              (dolist (occ occurrences)
-                (set-marker (nth 0 occ) nil)
-                (set-marker (nth 1 occ) nil))
-              (claude-pair-review--answer id "error" :message claude-pair-review--changed-message)
-              (message "claude-pair: the text changed under Claude's edit; it was not applied"))
-          ;; Whatever happens, the daemon must hear the outcome, or Claude waits forever.
-          (condition-case err
-              (progn
-                (claude-pair-review--replace proposal)
-                (let ((saved (and claude-pair-review-autosave (not unsaved))))
-                  (when saved
-                    (when new-file
-                      (make-directory (file-name-directory (plist-get proposal :path)) t))
-                    (let ((save-silently t) (inhibit-message t))
-                      (save-buffer)))
-                  (claude-pair-review--answer id "applied" :saved saved :created new-file)
-                  (message "claude-pair: applied Claude's edit to %s%s"
-                           (file-name-nondirectory (plist-get proposal :path))
-                           (if saved "" " (not saved: the buffer has unsaved changes of yours)"))))
-            (error
-             (claude-pair-review--answer
-              id "error" :message (format "Emacs could not apply the edit: %s" (error-message-string err)))
-             (message "claude-pair: could not apply Claude's edit: %s" (error-message-string err)))))))))
-
-(defun claude-pair-review--replace (proposal)
-  "Make PROPOSAL's change as a single undo step."
-  (let ((group (prepare-change-group))
-        (done nil))
-    (unwind-protect
-        (progn
-          (activate-change-group group)
-          (if (eq (plist-get proposal :kind) 'write)
-              (let ((new (nth 3 (car (plist-get proposal :occurrences)))))
-                (replace-region-contents (point-min) (point-max) (lambda () new)))
-            (dolist (occ (reverse (plist-get proposal :occurrences)))
-              (save-excursion
-                (goto-char (nth 0 occ))
-                (delete-region (nth 0 occ) (nth 1 occ))
-                (insert (nth 3 occ)))))
-          (setq done t))
-      (if done
-          (accept-change-group group)
-        (cancel-change-group group))
-      (undo-amalgamate-change-group group))
-    (dolist (occ (plist-get proposal :occurrences))
-      (set-marker (nth 0 occ) nil)
-      (set-marker (nth 1 occ) nil))))
+  (let* ((proposal (claude-pair-review--proposal (or id (claude-pair-review--at-point))))
+         (buffer (plist-get proposal :buffer)))
+    (if (not (buffer-live-p buffer))
+        (progn (dolist (hunk (claude-pair-review--pending proposal))
+                 (claude-pair-review--settle hunk 'error "The buffer was killed."))
+               (claude-pair-review--maybe-finish proposal))
+      (with-current-buffer buffer
+        (let ((clean (not (buffer-modified-p)))
+              (applied nil))
+          ;; From the last hunk back, so each one's line numbers still hold.
+          (dolist (hunk (reverse (claude-pair-review--pending proposal)))
+            (when (claude-pair-review--apply-one hunk proposal t)
+              (push hunk applied)))
+          (when (and applied claude-pair-review-autosave clean)
+            (condition-case err
+                (progn (claude-pair-review--save proposal)
+                       (dolist (hunk applied)
+                         (setf (claude-pair-review--hunk-saved hunk) t)))
+              (error (message "claude-pair: could not save %s: %s"
+                              (buffer-name) (error-message-string err))))))
+        (claude-pair-review--maybe-finish proposal)))))
 
 (defun claude-pair-review-reject (&optional id reason)
-  "Reject Claude's proposed edit ID, or the one at point.
+  "Reject every waiting hunk of Claude's edit ID, or of the edit at point.
 Interactively, ask for REASON, an optional note Claude reads."
   (interactive
    (list nil (read-string "Tell Claude why, or what to do instead (optional): ")))
-  (let* ((id (or id (claude-pair-review--at-point)))
-         (proposal (or (gethash id claude-pair-review--proposals)
-                       (user-error "That edit is no longer waiting"))))
-    (claude-pair-review--clear proposal)
-    (claude-pair-review--answer id "rejected" :message (or reason ""))
-    (message "claude-pair: rejected Claude's edit to %s"
-             (file-name-nondirectory (plist-get proposal :path)))))
+  (let ((proposal (claude-pair-review--proposal (or id (claude-pair-review--at-point)))))
+    (dolist (hunk (claude-pair-review--pending proposal))
+      (claude-pair-review--settle hunk 'rejected (or reason "")))
+    (claude-pair-review--maybe-finish proposal)))
+
+(defun claude-pair-review-apply-hunk (&optional all)
+  "Apply the hunk at point, as one undo step.
+With prefix argument ALL, apply every waiting hunk of its edit."
+  (interactive "P")
+  (let* ((hunk (or (claude-pair-review--hunk-at-point)
+                   (user-error "Point is not on a hunk Claude proposed")))
+         (proposal (claude-pair-review--proposal (claude-pair-review--hunk-id hunk))))
+    (if all
+        (claude-pair-review-apply (plist-get proposal :id))
+      (claude-pair-review--apply-one hunk proposal)
+      (claude-pair-review--after-decision proposal))))
+
+(defun claude-pair-review-reject-hunk (&optional all reason)
+  "Reject the hunk at point, asking for REASON, an optional note for Claude.
+With prefix argument ALL, reject every waiting hunk of its edit."
+  (interactive "P")
+  (let* ((hunk (or (claude-pair-review--hunk-at-point)
+                   (user-error "Point is not on a hunk Claude proposed")))
+         (proposal (claude-pair-review--proposal (claude-pair-review--hunk-id hunk)))
+         (reason (or reason
+                     (read-string (if all
+                                      "Tell Claude why, or what to do instead (optional): "
+                                    "Tell Claude why you reject this hunk (optional): ")))))
+    (if all
+        (claude-pair-review-reject (plist-get proposal :id) reason)
+      (claude-pair-review--settle hunk 'rejected reason)
+      (claude-pair-review--after-decision proposal))))
+
+(defun claude-pair-review--after-decision (proposal)
+  "Move to PROPOSAL's next waiting hunk, or tell Claude the outcome."
+  (if-let* ((next (car (claude-pair-review--pending proposal))))
+      (progn (goto-char (overlay-start (claude-pair-review--hunk-banner next)))
+             (message "claude-pair: %d more hunk%s of this edit to decide"
+                      (length (claude-pair-review--pending proposal))
+                      (if (cdr (claude-pair-review--pending proposal)) "s" "")))
+    (claude-pair-review--maybe-finish proposal)))
+
+(defun claude-pair-review--hunks-here ()
+  "Return the waiting hunks in this buffer, in buffer order."
+  (sort (seq-mapcat #'claude-pair-review--pending
+                    (claude-pair-review--in-buffer (current-buffer)))
+        (lambda (a b) (< (overlay-start (claude-pair-review--hunk-banner a))
+                         (overlay-start (claude-pair-review--hunk-banner b))))))
+
+(defun claude-pair-review-next-hunk ()
+  "Move to the next hunk Claude proposed in this buffer."
+  (interactive)
+  (let ((here (or (claude-pair-review--hunk-at-point) (point))))
+    (if-let* ((next (seq-find (lambda (h)
+                                (> (overlay-start (claude-pair-review--hunk-banner h))
+                                   (if (integerp here) here
+                                     (overlay-start (claude-pair-review--hunk-banner here)))))
+                              (claude-pair-review--hunks-here))))
+        (goto-char (overlay-start (claude-pair-review--hunk-banner next)))
+      (user-error "No later hunk"))))
+
+(defun claude-pair-review-previous-hunk ()
+  "Move to the previous hunk Claude proposed in this buffer."
+  (interactive)
+  (let ((here (or (claude-pair-review--hunk-at-point) (point))))
+    (if-let* ((previous (seq-find (lambda (h)
+                                    (< (overlay-start (claude-pair-review--hunk-banner h))
+                                       (if (integerp here) here
+                                         (overlay-start (claude-pair-review--hunk-banner here)))))
+                                  (reverse (claude-pair-review--hunks-here)))))
+        (goto-char (overlay-start (claude-pair-review--hunk-banner previous)))
+      (user-error "No earlier hunk"))))
 
 (defun claude-pair-review-show (&optional id)
-  "Show Claude's proposed edit ID, or the newest one."
+  "Show the first waiting hunk of Claude's edit ID, or of the newest edit."
   (interactive)
-  (let* ((id (or id (claude-pair-review--at-point)))
-         (proposal (or (gethash id claude-pair-review--proposals)
-                       (user-error "That edit is no longer waiting")))
-         (banner (plist-get proposal :banner)))
+  (let* ((proposal (claude-pair-review--proposal (or id (claude-pair-review--at-point))))
+         (hunk (car (claude-pair-review--pending proposal))))
     (pop-to-buffer (plist-get proposal :buffer))
-    (goto-char (overlay-start banner))))
+    (goto-char (overlay-start (claude-pair-review--hunk-banner hunk)))))
 
 (defun claude-pair-review--withdraw (params)
   "Remove the proposal PARAMS names; Claude no longer wants an answer."
@@ -603,13 +924,11 @@ Interactively, ask for REASON, an optional note Claude reads."
              (plist-get params :reason))))
 
 (defun claude-pair-review--on-kill ()
-  "Reject proposals in a buffer that is being killed."
-  (let ((buffer (current-buffer)) ids)
-    (maphash (lambda (id p) (when (eq (plist-get p :buffer) buffer) (push id ids)))
-             claude-pair-review--proposals)
-    (dolist (id ids)
-      (claude-pair-review--clear (gethash id claude-pair-review--proposals))
-      (claude-pair-review--answer id "rejected" :message "The user closed the buffer."))))
+  "Reject the waiting hunks of a buffer that is being killed."
+  (dolist (proposal (claude-pair-review--in-buffer (current-buffer)))
+    (dolist (hunk (claude-pair-review--pending proposal))
+      (claude-pair-review--settle hunk 'rejected "The user closed the buffer."))
+    (claude-pair-review--maybe-finish proposal)))
 
 (defun claude-pair-review--on-disconnect ()
   "Remove every proposal: with the daemon gone, none can be answered."

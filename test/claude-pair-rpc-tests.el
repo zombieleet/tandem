@@ -240,6 +240,8 @@
             (call-process
              (expand-file-name invocation-name invocation-directory) nil nil nil
              "-Q" "--batch" "-L" lisp-dir
+             ;; Stale .elc files would speak an older protocol.
+             "--eval" "(setq load-prefer-newer t)"
              "--eval" (format "(setq claude-pair-socket-path %S)" claude-pair-socket-path)
              "--eval" "(progn (require 'claude-pair) (claude-pair-connect))")))
       (should (eql status 0))

@@ -210,3 +210,39 @@ func TestInsideProject(t *testing.T) {
 		}
 	}
 }
+
+func TestPartialEditTellsClaudeEachHunk(t *testing.T) {
+	d := startDaemon(t, 0, "cpd-")
+	c := ready(t, d)
+	dir := project(t)
+	id := createSessionIn(t, c, dir)
+	prompt(t, c, id, editPrompt(t, map[string]any{"file": "a.txt", "old": "x", "new": "y"}))
+	p := c.nextNotification("edit/propose")
+	wantCode(t, answerEdit(c, p["requestId"].(string), map[string]any{"outcome": "partial"}), protocol.InvalidParams)
+	wantOK(t, answerEdit(c, p["requestId"].(string), map[string]any{
+		"outcome": "partial", "saved": true,
+		"hunks": []map[string]any{
+			{"index": 1, "line": 3, "oldLines": 2, "newLines": 3, "decision": "applied", "saved": true},
+			{"index": 2, "line": 20, "oldLines": 1, "newLines": 1, "decision": "rejected", "note": "keep the old name"},
+			{"index": 3, "line": 30, "oldLines": 1, "newLines": 0, "decision": "error",
+				"note": "The text to replace changed in Emacs while the user was reviewing the edit.  Read the file again."},
+		}}))
+	updates := c.untilIdle(id)
+	want := "edit result: The user reviewed your edit to a.txt hunk by hunk and applied 1 of its 3 hunks:\n" +
+		"- Hunk 1 (2 lines at line 3, becoming 3 lines): applied.\n" +
+		"- Hunk 2 (1 line at line 20): rejected; those lines are unchanged. Their note: keep the old name\n" +
+		"- Hunk 3 (1 line at line 30, becoming 0 lines): not applied: The text to replace changed in Emacs while the user was reviewing the edit.  Read the file again.\n" +
+		"The applied hunks are saved. The file now differs from your new_string, so read it again before you edit it further, and do not send rejected hunks again unchanged."
+	if got := turnText(updates); got != want {
+		t.Fatalf("text:\n%s\nwant:\n%s", got, want)
+	}
+	var partial map[string]any
+	for _, u := range updates {
+		if u["kind"] == "edit" && u["state"] == "partial" {
+			partial = u
+		}
+	}
+	if hunks, _ := partial["hunks"].([]any); len(hunks) != 3 {
+		t.Fatalf("followers get the hunks: %v", partial)
+	}
+}

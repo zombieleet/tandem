@@ -1,0 +1,116 @@
+#+title: claude-pair · Phase 2 · Review
+#+startup: overview
+
+Phase 2 meets the two requirements phase 1 left open: approve, reject or
+ask Claude about each block of changes from a small popup next to it, and
+Claude's lines keep a colour until someone other than Claude edits them.
+Same rules as phase 1: every change gets automatic tests, live checks
+cost money only when you say so, each milestone ends with your visual
+check, and a milestone is committed before the next one starts.
+
+* Decisions
+- 20 Nov 2026 :: Hunks are computed in Emacs (a line diff, Myers'
+  algorithm, in Elisp), because only Emacs has the buffer's live text,
+  unsaved changes included. The daemon only words the result for Claude.
+- 20 Nov 2026 :: Approving a hunk applies it at once, as its own undo
+  step, and saves the buffer if it had no unsaved changes of yours. Claude
+  hears the outcome when the last hunk of an edit is decided.
+- 20 Nov 2026 :: Reopening earlier chats stays in phase 3, as the plan
+  has it (the resume picker).
+
+* DONE M1 · Per-hunk review [7/7]
+- [X] An edit is split into hunks: the changed lines, with unchanged lines
+  between them left alone and editable
+- [X] Each hunk shows like an M4 proposal: old lines struck through and
+  locked, new lines below as real, read-only text, a line above it
+  ("hunk 2 of 3")
+- [X] On a hunk: =C-c C-a= applies it, =C-c C-k= rejects it with an
+  optional note; =C-u= does the same for every hunk of the edit; =n= and
+  =p= move between hunks
+- [X] An applied hunk is one undo step, and is saved if the buffer had no
+  unsaved changes of yours
+- [X] Claude hears which hunks were applied and which were rejected, with
+  your notes, once the last one is decided (protocol 0.7.0)
+- [X] The chat block counts hunks; =y= and =n= decide all of them, =RET=
+  shows the next undecided one
+- [X] Everything M4 guaranteed still holds: saving writes only your text,
+  a revert drops the edit, no undo or modified-flag noise
+** Auto
+- [X] ERT: the diff (random texts: applying the hunks gives the new text),
+  hunk display, mixed decisions, undo per hunk, saving, write and new
+  files, replace_all
+- [X] Go: the wording Claude gets for mixed decisions
+** Interactive check run by Claude (real terminal Emacs in tmux, fake claude)
+- [X] A three-hunk edit of =geo.py=: three banners, unchanged lines between
+  them untouched; the chat block says "3 hunks" and "apply all"
+- [X] =C-c C-a= applied hunk 1 and saved; point moved to hunk 2;
+  =C-c C-k= asked for a note; =C-c C-a= on hunk 3; Claude got the
+  per-hunk result and the chat shows "◐ Applied 2 of 3 hunks, saved"
+- [X] One =C-/= undid hunk 3 only
+- [X] Found and fixed: the banner wrapped in an 80-column window (now
+  short); the save hook could finish an edit before it knew it was saved
+** Visual gate (passed 20 Nov 2026, in your Doom Emacs)
+- [X] An edit touching three separate places shows three hunks
+- [X] Apply the first, reject the second with a note, apply the third:
+  Claude reacts to the note
+- [X] =C-/= after applying a hunk undoes that hunk only
+
+* TODO M2 · The popup [0/5]
+- [ ] A small popup next to the hunk: Approve, Reject…, Ask Claude…, with
+  "Claude · hunk 2 of 5 · file"
+- [ ] Opens when point enters a hunk (after 0.3 s idle) and on mouse hover;
+  =M-RET= opens it by hand
+- [ ] GUI: a child frame that never takes focus; terminal (before Emacs
+  31): a row of buttons above the hunk
+- [ ] Mouse clicks and the keys work in both
+- [ ] Never covers the hunk itself; closes when point leaves
+** Visual gate
+- [ ] Keyboard and mouse, in a GUI Emacs and in =emacs -nw=
+
+* TODO M3 · Ask Claude about a hunk [0/4]
+- [ ] "Ask Claude…" (=C-c C-'=) takes a question, with =@claude=
+- [ ] The edit returns to Claude as a question about that hunk; Claude
+  answers in the chat and may propose a revised hunk
+- [ ] The answer also shows as a note on the hunk, like a review comment
+- [ ] Other hunks of the edit keep their decisions
+** Visual gate
+- [ ] Ask "why not use a list comprehension?" on a hunk: answer and a
+  revised hunk appear
+
+* TODO M4 · Claude's lines keep their colour [0/6]
+- [ ] Applied Claude text gets the =claude-pair-author= property: session,
+  turn, model, time
+- [ ] A tint and a fringe mark on Claude's lines (never colour alone)
+- [ ] Any change that is not Claude's removes the colour from every line
+  it touches; typing next to Claude's text, or pasting it, makes it yours
+- [ ] Undo and redo bring the colour back or take it away
+- [ ] Formatters: with =claude-pair-attribution-ignore-whitespace=, a line
+  whose only change is whitespace keeps its colour
+- [ ] The tint follows the theme (recomputed on theme change)
+** Visual gate
+- [ ] Claude's lines are tinted; edit one character: that line loses it
+- [ ] Undo brings it back; reindent the buffer: colours stay
+
+* TODO M5 · Colours survive closing the file [0/3]
+- [ ] Saved under =~/.cache/claude-pair/= per project: line ranges and a
+  hash per line, on save and on kill
+- [ ] Reattached when the file is opened again; lines changed in between
+  lose their colour
+- [ ] =M-x claude-pair-blame=: who wrote this line, in which chat and turn
+** Visual gate
+- [ ] Restart Emacs, reopen a file Claude edited: colours are back
+
+* TODO M6 · Review dashboard and review styles [0/3]
+- [ ] =M-x claude-pair-review=: every pending hunk across files in a
+  list; jump, apply or reject from it
+- [ ] =claude-pair-review-style=: =blocking= (default), =deferred=
+  (Claude keeps working; your decisions go back at the end of the turn),
+  =auto-accept= (applied at once, still coloured and revertable)
+- [ ] The header line shows how many hunks wait
+** Visual gate
+- [ ] A deferred turn with edits in two files, decided from the dashboard
+
+* TODO M7 · Phase 2 wrap-up [0/3]
+- [ ] README and protocol document
+- [ ] =make check= clean
+- [ ] Your sign-off: daily use with the popup and colours

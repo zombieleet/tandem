@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -24,10 +25,23 @@ import (
 // the proposal (edit/withdraw).
 
 type editAnswer struct {
-	Outcome string `json:"outcome"` // applied, rejected or error
+	Outcome string `json:"outcome"` // applied, rejected, partial or error
 	Message string `json:"message"`
 	Saved   bool   `json:"saved"`
 	Created bool   `json:"created"`
+	// Hunks is how each hunk was decided, when the edit had several.
+	Hunks []hunkDecision `json:"hunks,omitempty"`
+}
+
+// hunkDecision is the user's decision on one hunk of an edit.
+type hunkDecision struct {
+	Index    int    `json:"index"`
+	Line     int    `json:"line"` // where the hunk started when proposed
+	OldLines int    `json:"oldLines"`
+	NewLines int    `json:"newLines"`
+	Decision string `json:"decision"` // applied, rejected or error
+	Note     string `json:"note"`
+	Saved    bool   `json:"saved"`
 }
 
 type pendingEdit struct {
@@ -118,7 +132,7 @@ func (d *Daemon) proposeEdit(ctx context.Context, c *client, params json.RawMess
 	case a := <-req.answer:
 		d.broadcast(p.SessionID, session.Update{
 			"kind": "edit", "state": a.Outcome, "requestId": req.id,
-			"message": a.Message, "saved": a.Saved, "created": a.Created,
+			"message": a.Message, "saved": a.Saved, "created": a.Created, "hunks": a.Hunks,
 		})
 		return editOutcome(rel, a), nil
 	case reason := <-req.withdraw:
@@ -150,6 +164,8 @@ func editOutcome(rel string, a editAnswer) toolResult {
 			text += " Their note: " + a.Message
 		}
 		return toolResult{Text: text + " Do not send the same change again.", IsError: true}
+	case "partial":
+		return toolResult{Text: partialOutcome(rel, a), IsError: true}
 	default:
 		message := a.Message
 		if message == "" {
@@ -157,6 +173,62 @@ func editOutcome(rel string, a editAnswer) toolResult {
 		}
 		return toolResult{Text: message, IsError: true}
 	}
+}
+
+// partialOutcome tells Claude which hunks of its edit the user applied and
+// which not, so it knows what the file now holds.
+func partialOutcome(rel string, a editAnswer) string {
+	applied := 0
+	for _, h := range a.Hunks {
+		if h.Decision == "applied" {
+			applied++
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "The user reviewed your edit to %s hunk by hunk and applied %d of its %d hunks:\n",
+		rel, applied, len(a.Hunks))
+	for _, h := range a.Hunks {
+		fmt.Fprintf(&b, "- Hunk %d (%s at line %d", h.Index, plural(h.OldLines, "line"), h.Line)
+		if h.NewLines != h.OldLines {
+			fmt.Fprintf(&b, ", becoming %s", plural(h.NewLines, "line"))
+		}
+		b.WriteString("): ")
+		switch h.Decision {
+		case "applied":
+			b.WriteString("applied.")
+		case "rejected":
+			b.WriteString("rejected; those lines are unchanged.")
+			if h.Note != "" {
+				b.WriteString(" Their note: " + h.Note)
+			}
+		default:
+			b.WriteString("not applied")
+			if h.Note != "" {
+				b.WriteString(": " + h.Note)
+			} else {
+				b.WriteString(".")
+			}
+		}
+		b.WriteString("\n")
+	}
+	if applied > 0 {
+		if a.Saved {
+			b.WriteString("The applied hunks are saved. ")
+		} else {
+			b.WriteString("The applied hunks are not saved yet, because that buffer has unsaved changes " +
+				"of the user's, so commands that read the file from disk still see the old version. ")
+		}
+	}
+	b.WriteString("The file now differs from your new_string, so read it again before you edit it further, " +
+		"and do not send rejected hunks again unchanged.")
+	return b.String()
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return "1 " + word
+	}
+	return fmt.Sprintf("%d %ss", n, word)
 }
 
 func (d *Daemon) answerEdit(c *client, params json.RawMessage) (any, error) {
@@ -168,8 +240,12 @@ func (d *Daemon) answerEdit(c *client, params json.RawMessage) (any, error) {
 		editAnswer
 	}
 	if len(params) == 0 || json.Unmarshal(params, &p) != nil || p.RequestID == "" ||
-		(p.Outcome != "applied" && p.Outcome != "rejected" && p.Outcome != "error") {
-		return nil, rpc.Errorf(protocol.InvalidParams, `edit/answer needs a requestId and an outcome of "applied", "rejected" or "error"`)
+		(p.Outcome != "applied" && p.Outcome != "rejected" && p.Outcome != "partial" && p.Outcome != "error") {
+		return nil, rpc.Errorf(protocol.InvalidParams,
+			`edit/answer needs a requestId and an outcome of "applied", "rejected", "partial" or "error"`)
+	}
+	if p.Outcome == "partial" && len(p.Hunks) == 0 {
+		return nil, rpc.Errorf(protocol.InvalidParams, `a "partial" edit/answer needs its hunks`)
 	}
 	d.mu.Lock()
 	req := d.edits[p.RequestID]

@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.6.0**. This document is the contract between the Emacs client
+Version **0.7.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -238,12 +238,17 @@ review itself is the question, and no permission rule can skip it.
    `editKind`, `filePath`, `relPath`, `title`.
 4. The client checks the edit against the file's live buffer, shows it, and
    answers with `edit/answer` `{requestId, outcome: "applied" | "rejected" |
-   "error", message, saved, created}`. Only the client the edit was proposed
+   "partial" | "error", message, saved, created, hunks}`. A client may
+   split an edit into hunks for the user to decide one by one; `hunks` then
+   lists each one as `{index, line, oldLines, newLines, decision:
+   "applied" | "rejected" | "error", note, saved}`, where `line` is where
+   the hunk started when proposed. `partial` means some hunks were applied
+   and some not, and requires `hunks`. Only the client the edit was proposed
    to may answer; others get `-32006`. The client's error messages follow the
    built-in Edit tool's: `String to replace not found in file.`, `Found N
    matches of the string to replace, but replace_all is false. …`.
-5. Followers get `state` equal to the outcome, with `message`, `saved` and
-   `created`. Claude gets the outcome as the tool's result: an error result
+5. Followers get `state` equal to the outcome, with `message`, `saved`,
+   `created` and `hunks`. Claude gets the outcome as the tool's result: an error result
    for a rejection, with the user's note, or for an error.
 6. A cancelled turn, a closed session, a stopping daemon or a departed helper
    withdraws the edit: the reviewing client gets `edit/withdraw` `{requestId,

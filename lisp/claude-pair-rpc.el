@@ -48,7 +48,7 @@
 (defconst claude-pair-version "0.1.0"
   "Version of the claude-pair Emacs package.")
 
-(defvar claude-pair-rpc-protocol-version "0.6.0"
+(defvar claude-pair-rpc-protocol-version "0.7.0"
   "Protocol version this client speaks.  See protocol/PROTOCOL.md.")
 
 (defcustom claude-pair-daemon-command nil

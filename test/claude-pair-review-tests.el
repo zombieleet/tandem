@@ -14,45 +14,6 @@
 (require 'claude-pair)
 (require 'claude-pair-test-helpers)
 
-(defvar claude-pair-test--answers nil
-  "The edit/answer calls recorded by `claude-pair-test-with-file'.")
-
-(defmacro claude-pair-test-with-file (content &rest body)
-  "Run BODY with FILE bound to a new file holding CONTENT.
-Calls to the daemon are recorded in `claude-pair-test--answers'."
-  (declare (indent 1) (debug t))
-  `(let* ((dir (claude-pair-test--private-dir))
-          (file (expand-file-name "a.txt" dir))
-          (claude-pair-test--answers nil))
-     (with-temp-file file (insert ,content))
-     (cl-letf (((symbol-function 'claude-pair-rpc-request)
-                (lambda (method params &optional _timeout)
-                  (when (eq method 'edit/answer)
-                    (push params claude-pair-test--answers))
-                  '(:ok t))))
-       (unwind-protect
-           (progn ,@body)
-         (maphash (lambda (_id p) (claude-pair-review--clear p)) claude-pair-review--proposals)
-         (dolist (b (buffer-list))
-           (when (and (buffer-file-name b) (string-prefix-p dir (buffer-file-name b)))
-             (with-current-buffer b (set-buffer-modified-p nil))
-             (kill-buffer b)))
-         (delete-directory dir t)))))
-
-(defun claude-pair-test--propose (id &rest params)
-  "Propose edit ID with PARAMS, as the daemon would."
-  (claude-pair-review--propose (append (list :requestId id :sessionId "s1") params)))
-
-(defun claude-pair-test--disk (file)
-  "Return FILE's content on disk."
-  (with-temp-buffer (insert-file-contents file) (buffer-string)))
-
-(defun claude-pair-test--overlay-with (property buffer)
-  "Return an overlay in BUFFER that has PROPERTY."
-  (with-current-buffer buffer
-    (seq-find (lambda (ov) (overlay-get ov property))
-              (overlays-in (point-min) (point-max)))))
-
 ;;;; Proposals, without a daemon
 
 (ert-deftest claude-pair-review-the-new-text-is-real-text-and-the-file-is-untouched ()
@@ -254,7 +215,7 @@ Calls to the daemon are recorded in `claude-pair-test--answers'."
 (ert-deftest claude-pair-review-a-failure-while-applying-is-reported ()
   (claude-pair-test-with-file "one x two\n"
     (claude-pair-test--propose "e1" :kind "edit" :filePath file :oldString "x" :newString "y")
-    (cl-letf (((symbol-function 'claude-pair-review--replace) (lambda (_) (error "Disk on fire"))))
+    (cl-letf (((symbol-function 'claude-pair-review--replace) (lambda (&rest _) (error "Disk on fire"))))
       (claude-pair-review-apply "e1"))
     (should (equal (car claude-pair-test--answers)
                    '(:requestId "e1" :outcome "error" :message "Emacs could not apply the edit: Disk on fire"
@@ -421,28 +382,6 @@ Calls to the daemon are recorded in `claude-pair-test--answers'."
       (should (equal claude-pair-chat--state "running")))))
 
 ;;;; For real, through the daemon, the MCP helper and the fake claude
-
-(defun claude-pair-test--edit-prompt (spec)
-  "Return a fake-claude prompt for the edit SPEC, a plist."
-  (concat "script:edit:" (json-serialize spec)))
-
-(defun claude-pair-test--wait-proposal ()
-  "Wait until an edit proposal is shown, and return its id."
-  (should (claude-pair-test--wait-for
-           (lambda () (> (hash-table-count claude-pair-review--proposals) 0)) 10))
-  (let (id) (maphash (lambda (k _v) (setq id k)) claude-pair-review--proposals) id))
-
-(defmacro claude-pair-test-with-edit-project (&rest body)
-  "Run BODY in a project holding a.txt, with a chat in BUFFER."
-  (declare (indent 0) (debug t))
-  `(claude-pair-test-with-project
-     (with-temp-file (expand-file-name "a.txt" project) (insert "one x two\n"))
-     (unwind-protect
-         (progn (setq buffer (claude-pair)) ,@body)
-       (dolist (b (buffer-list))
-         (when (and (buffer-file-name b) (string-prefix-p project (buffer-file-name b)))
-           (with-current-buffer b (set-buffer-modified-p nil))
-           (kill-buffer b))))))
 
 (ert-deftest claude-pair-review-apply-for-real ()
   (claude-pair-test-with-edit-project
