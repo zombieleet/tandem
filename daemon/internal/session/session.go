@@ -29,6 +29,10 @@ type Options struct {
 	Cwd        string
 	ClaudePath string
 	Model      string
+	// Env changes claude's environment, which is otherwise the daemon's: a
+	// name with a value sets it, a name with nil removes it. Values are
+	// credentials, so they are never logged.
+	Env map[string]*string
 	// HelperCommand starts the MCP helper ("claude-paird mcp ..."). When
 	// set, permission prompts go to its permission tool; when empty,
 	// anything that would ask is denied.
@@ -258,6 +262,9 @@ func (s *Session) Args(resume bool) []string {
 func (s *Session) startLocked() error {
 	cmd := exec.Command(s.opts.ClaudePath, s.Args(s.resumable)...)
 	cmd.Dir = s.opts.Cwd
+	if len(s.opts.Env) > 0 {
+		cmd.Env = MergeEnv(os.Environ(), s.opts.Env)
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return err
@@ -381,4 +388,22 @@ func (t *tailBuffer) String() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return string(t.buf)
+}
+
+// MergeEnv returns base, a list of NAME=value, changed by overrides: a name
+// with a value replaces or adds it, a name with nil removes it.
+func MergeEnv(base []string, overrides map[string]*string) []string {
+	var out []string
+	for _, kv := range base {
+		name, _, _ := strings.Cut(kv, "=")
+		if _, changed := overrides[name]; !changed {
+			out = append(out, kv)
+		}
+	}
+	for name, value := range overrides {
+		if value != nil {
+			out = append(out, name+"="+*value)
+		}
+	}
+	return out
 }

@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.5.0**. This document is the contract between the Emacs client
+Version **0.6.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -105,7 +105,12 @@ No params. Result:
 ### `session/new` (client → daemon)
 
 Params: `cwd` (absolute path of an existing directory, the project root),
-`claudePath` (absolute path of the `claude` command), optional `model`.
+`claudePath` (absolute path of the `claude` command), optional `model`,
+optional `env`: an object from variable names to a string, which sets the
+variable for this session's `claude`, or `null`, which removes it. Every
+other variable comes from the daemon's own environment. A name that is empty
+or holds `=` fails with `-32602`. Values are typically credentials: the
+daemon never logs them.
 
 The daemon runs `claudePath --version` and refuses Claude Code older than
 2.1.0 with `-32005`. Result: `{sessionId, claudeVersion}`. The session id is a

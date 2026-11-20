@@ -6,7 +6,7 @@ in its headless stream-json mode. Emacs is the client: a chat buffer, Claude's
 edits reviewed in your real buffers, and windows Claude opens for you within
 limits you set.
 
-**Status:** phase 1, milestone 5. You can chat with Claude about a project,
+**Status:** phase 1, milestone 6 (wrap-up). You can chat with Claude about a project,
 watch its tool calls, stop an answer, allow or deny each command, review
 every edit Claude proposes in the file's own buffer before it happens, and
 let Claude show you files in up to 5 windows without ever taking your cursor.
@@ -14,33 +14,67 @@ See [PHASE-1.org](PHASE-1.org).
 
 ## Requirements
 
-- Emacs 29.1 or later (developed on 30.1)
-- Go 1.24 or later, to build the daemon from source
-- Claude Code 2.1.0 or later (`claude` on your PATH)
+- Emacs 29.1 or later
+- Claude Code 2.1.0 or later (`claude` on your `PATH`), logged in or set up
+  with an API key, Amazon Bedrock or Google Vertex AI
+- Linux or macOS
+- Go 1.24 or later, only to build the daemon yourself
 
-## Try it from a checkout
+## Install
+
+claude-pair has two parts: the Emacs package in `lisp/` and the daemon,
+`claude-paird`.
+
+**The daemon.** Build it from a checkout:
 
 ```sh
-make daemon   # build daemon/bin/claude-paird
-make check    # go vet, gofmt, byte-compile, checkdoc, Go tests (race detector), ERT tests
-              # (no test calls the model: they use daemon/bin/fakeclaude)
+git clone https://github.com/victory/claude-pair ~/src/claude-pair
+cd ~/src/claude-pair && make daemon      # daemon/bin/claude-paird
 ```
 
-Then start a clean Emacs with the package on the load path:
+The package finds a daemon built there by itself. Or download a prebuilt one
+for Linux or macOS (amd64 or arm64) from the releases page, check it, and put
+it on your `PATH` as `claude-paird`:
 
 ```sh
-emacs -Q -L ~/personal-projects/claude-pair/lisp --eval "(require 'claude-pair)"
+sha256sum -c --ignore-missing SHA256SUMS        # macOS: shasum -a 256 -c --ignore-missing SHA256SUMS
+install -m 755 claude-paird-0.1.0-linux-amd64 ~/.local/bin/claude-paird
 ```
 
-or add this to your init file:
+On macOS, a downloaded binary is quarantined until you run `xattr -d
+com.apple.quarantine ~/.local/bin/claude-paird`. If Emacs does not see your
+shell's `PATH` (common for the macOS app), set `claude-pair-daemon-command`
+to `'("/full/path/to/claude-paird")`, and `claude-pair-claude-command` the
+same way if `claude` is not found.
+
+**The package**, with a suggested key binding (`C-c` and a letter are yours
+to bind; pick any free one):
 
 ```elisp
-(add-to-list 'load-path "~/personal-projects/claude-pair/lisp")
-(require 'claude-pair)
+(use-package claude-pair
+  :load-path "~/src/claude-pair/lisp"
+  :commands claude-pair
+  :bind ("C-c C" . claude-pair))
 ```
 
-Emacs finds the daemon on your `exec-path` as `claude-paird`, or else uses the
-one `make daemon` built. Set `claude-pair-daemon-command` to use another.
+Without `use-package`:
+
+```elisp
+(add-to-list 'load-path "~/src/claude-pair/lisp")
+(autoload 'claude-pair "claude-pair" nil t)
+(keymap-global-set "C-c C" #'claude-pair)
+```
+
+To try it without touching your configuration:
+
+```sh
+emacs -Q -L ~/src/claude-pair/lisp --eval "(require 'claude-pair)"
+```
+
+## Use
+
+`M-x claude-pair` in any file of a project opens the chat in a tab named
+"Claude". Type after the `❯` prompt and send with `C-c C-c`.
 
 | Command | What it does |
 |---|---|
@@ -141,18 +175,72 @@ answers from any buffer; bind it to a key if you like.
 ## Credentials
 
 The daemon runs your installed `claude`, which uses whatever it is set up
-with: your Claude Code login, or `ANTHROPIC_API_KEY`, Amazon Bedrock or
-Google Vertex AI from the environment. The daemon inherits the environment of
-the Emacs that started it, so restart the daemon
-(`M-x claude-pair-stop-daemon`) after changing those variables.
-`claude-pair-claude-command` picks a specific `claude`, and `claude-pair-model`
-a model for new sessions.
+with: your Claude Code login, or an API key, Amazon Bedrock or Google Vertex
+AI from the environment.
+
+Each new chat takes the credential variables (`claude-pair-environment-variables`:
+`ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, the Bedrock and Vertex switches,
+the proxies and a few more) from Emacs as they are at that moment. To switch,
+say to an API key for a while:
+
+1. `M-x setenv RET ANTHROPIC_API_KEY RET` and paste the key. It stays in
+   that Emacs only; nothing is written to disk.
+2. Start a new chat: `C-u M-x claude-pair`.
+
+`C-u M-x setenv RET ANTHROPIC_API_KEY RET` removes it again; the next new
+chat uses your login. Chats already open keep what they started with.
+Values never appear in the daemon's log.
 
 ## The daemon
 
-The daemon listens on `$XDG_RUNTIME_DIR/claude-pair/daemon.sock` and logs to
-`daemon.log` in the same directory. It stops by itself after 10 minutes with
-no Emacs connected (`claude-pair-daemon-idle-timeout`).
+The daemon listens on `$XDG_RUNTIME_DIR/claude-pair/daemon.sock` (on macOS,
+`$TMPDIR/claude-pair-<uid>/daemon.sock`) and logs to `daemon.log` in the same
+directory, which must be private to you. It outlives Emacs and stops by
+itself after 10 minutes with no Emacs connected (reopening an earlier chat
+comes in phase 2).
+
+## Configuration
+
+`M-x customize-group RET claude-pair` lists everything. The ones you are most
+likely to change:
+
+| Option | Default | What it does |
+|---|---|---|
+| `claude-pair-layout-tab` | `"Claude"` | Tab the chat opens in; nil keeps the current tab |
+| `claude-pair-max-windows` | 5 | Most windows Claude's frame may have when Claude adds one |
+| `claude-pair-min-windows` | 2 | Fewest windows Claude leaves when it closes one |
+| `claude-pair-focus-guard-seconds` | 3 | How long after you use a window Claude leaves it alone |
+| `claude-pair-review-autosave` | t | Save a buffer after applying Claude's edit, if it had no unsaved changes of yours |
+| `claude-pair-model` | nil | Model for new chats, such as `"opus"`; nil for Claude Code's default |
+| `claude-pair-environment-variables` | credentials, provider, proxies | Variables each new chat takes from Emacs |
+| `claude-pair-claude-command` | nil | Path of `claude`; nil looks on `exec-path` |
+| `claude-pair-daemon-command` | nil | Command that runs the daemon; nil looks on `exec-path`, then in the checkout |
+| `claude-pair-daemon-idle-timeout` | 600 | Seconds the daemon waits with no Emacs before it stops; 0 never |
+| `claude-pair-chat-window-width` | 0.38 | Width of the chat window, as a fraction of the frame or in columns |
+| `claude-pair-socket-path` | nil | The daemon's socket; nil for the default above |
+
+## Troubleshooting
+
+| You see | Do this |
+|---|---|
+| "…speaks protocol X, but the running claude-paird speaks Y" | Answer `y` to restart it, or `M-x claude-pair-stop-daemon`. It happens after upgrading. |
+| "Cannot find claude-paird" | `make daemon` in the checkout, or set `claude-pair-daemon-command`. |
+| "…has mode 775, so other users can reach the socket" | `chmod 700` that directory, or set `claude-pair-socket-path` to a private one. |
+| "claude … is too old" or not found | Update Claude Code, or set `claude-pair-claude-command`. |
+| A changed key or login is not used | Start a new chat with `C-u M-x claude-pair`. |
+| Anything else | `M-x claude-pair-events-buffer` shows every message; `daemon.log` sits next to the socket. |
+
+## Development
+
+```sh
+make check    # go vet, gofmt, versions, byte-compile, checkdoc, Go tests (race detector), ERT tests
+              # (no test calls the model: they use daemon/bin/fakeclaude)
+make dist     # static daemons for Linux and macOS, amd64 and arm64, with SHA256SUMS, in dist/
+make help     # every target
+```
+
+A release is a tag `vX.Y.Z` matching both `;; Version:` in `lisp/claude-pair.el`
+and `daemon/internal/version`; pushing it builds the daemons and publishes them.
 
 ## Layout
 
@@ -164,6 +252,7 @@ no Emacs connected (`claude-pair-daemon-idle-timeout`).
 | `test/` | ERT tests, shared helpers and the checkdoc runner |
 | `daemon/internal/testutil/fakeclaude` | A stand-in for Claude Code that the tests drive; it never calls a model |
 | `PHASE-1.org` | The phase 1 checklist, with automatic and visual tests |
+| `.github/workflows/` | CI (`make check` on Linux and macOS, Emacs 29.1 and 30.1) and releases |
 
 ## License
 

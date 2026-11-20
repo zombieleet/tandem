@@ -2,3 +2,4 @@
 /daemon/bin/
 *.log
 .DS_Store
+/dist/

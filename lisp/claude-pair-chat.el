@@ -61,6 +61,21 @@
   :type '(choice (const :tag "Find on exec-path" nil) file)
   :group 'claude-pair)
 
+(defcustom claude-pair-environment-variables
+  '("ANTHROPIC_API_KEY" "ANTHROPIC_AUTH_TOKEN" "ANTHROPIC_BASE_URL" "ANTHROPIC_MODEL"
+    "CLAUDE_CODE_USE_BEDROCK" "CLAUDE_CODE_USE_VERTEX"
+    "AWS_PROFILE" "AWS_REGION" "CLOUD_ML_REGION" "ANTHROPIC_VERTEX_PROJECT_ID"
+    "HTTPS_PROXY" "HTTP_PROXY" "NO_PROXY" "https_proxy" "http_proxy" "no_proxy")
+  "Environment variables each new session takes from Emacs.
+Claude Code reads its credentials and provider from these.  A new
+session gets the value Emacs has now (see `getenv'), or the variable
+removed if Emacs has none, whatever the daemon started with.  So after
+\[setenv], a new chat (\[universal-argument] \[claude-pair]) uses the new value
+without restarting the daemon.  Other variables come from the daemon,
+which inherited them from the Emacs that started it."
+  :type '(repeat string)
+  :group 'claude-pair)
+
 (defcustom claude-pair-model nil
   "Model for new sessions, such as \"opus\", or nil for Claude Code's default."
   :type '(choice (const :tag "Claude Code's default" nil) string)
@@ -216,7 +231,8 @@ Type after the prompt at the bottom and press \\[claude-pair-chat-send]."
 
 (defun claude-pair-chat--create (root)
   "Start a session about ROOT and return its new chat buffer."
-  (let* ((params (list :cwd root :claudePath (claude-pair-chat--claude-path)))
+  (let* ((params (list :cwd root :claudePath (claude-pair-chat--claude-path)
+                       :env (claude-pair-chat--environment)))
          (result
           (condition-case err
               (claude-pair-rpc-request
@@ -230,6 +246,15 @@ Type after the prompt at the bottom and press \\[claude-pair-chat-send]."
     (with-current-buffer buffer
       (claude-pair-chat--setup (plist-get result :sessionId) root))
     buffer))
+
+(defun claude-pair-chat--environment ()
+  "Return `claude-pair-environment-variables' as Emacs has them now.
+A plist from each name to its value, or nil (JSON null) for a variable
+Emacs does not have."
+  (let (env)
+    (dolist (name claude-pair-environment-variables)
+      (setq env (plist-put env (intern (concat ":" name)) (getenv name))))
+    env))
 
 (defun claude-pair-chat--display (buffer)
   "Show BUFFER in a side window on the right and select it.

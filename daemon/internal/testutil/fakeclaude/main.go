@@ -3,7 +3,7 @@
 // Claude Code 2.1.327, and never calls a model.
 //
 // A prompt "script:NAME[:ARG]" picks a scenario: hello, args, nostream,
-// tools, slow:N, crash, fail, subagent, bash:CMD, bash2:CMD (the same
+// tools, slow:N, crash, fail, subagent, env:NAME[,NAME…], bash:CMD, bash2:CMD (the same
 // command twice), sleepbash:MS:CMD, webfetch:URL, and edit:JSON or
 // write:JSON, where JSON holds file (relative to the working directory),
 // old, new and all, or file and content. Edits call the emacs server's
@@ -145,6 +145,17 @@ func turn(prompt string, args []string) {
 		name, arg, _ = strings.Cut(rest, ":")
 	}
 	switch name {
+	case "env": // env:A,B reports each variable as A=value or A unset
+		var parts []string
+		for _, name := range strings.Split(arg, ",") {
+			if v, ok := os.LookupEnv(name); ok {
+				parts = append(parts, name+"="+v)
+			} else {
+				parts = append(parts, name+" unset")
+			}
+		}
+		streamText([]string{strings.Join(parts, " ")}, 0)
+		result("success", false, nil)
 	case "hello":
 		streamText([]string{"Hel", "lo ", "wörld 🌍"}, 0)
 		result("success", false, nil)

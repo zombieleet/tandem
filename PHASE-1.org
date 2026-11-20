@@ -438,9 +438,38 @@ Then open a file in a project and =M-x claude-pair=.
 - [X] Ask Claude to close its windows: it stops at 2, yours and the chat
 - [X] Switch to your first tab while Claude works: nothing appears there
 
-* TODO M6 · Phase 1 wrap-up [0/5]
-- [ ] README: install, configure, suggested key binding
-- [ ] Prebuilt daemon binaries for Linux and macOS (amd64 and arm64)
-- [ ] =make check= clean
+* DOING M6 · Phase 1 wrap-up [6/8]
+- [X] Credentials (found by you): the daemon kept the environment it
+  started with, so =setenv ANTHROPIC_API_KEY= did nothing until it was
+  restarted. Now each new chat takes =claude-pair-environment-variables=
+  (credentials, provider, proxies) from Emacs as they are then: set,
+  passed; unset in Emacs, removed. Protocol 0.6.0, so an older daemon is
+  offered a restart instead of silently ignoring the key. Values never
+  reach the daemon's log (tested)
+- [X] README: requirements, install (daemon from source or prebuilt, the
+  package with or without =use-package=), a suggested key binding
+  (=C-c C=), use, credentials, configuration table, troubleshooting,
+  development
+- [X] Prebuilt daemon binaries: =make dist= builds static daemons for
+  Linux and macOS, amd64 and arm64, version-stamped, with SHA256SUMS
+- [X] CI, ready for a GitHub remote: =make check= on Ubuntu and macOS
+  with Emacs 29.1 and 30.1; pushing a tag =vX.Y.Z= checks it matches both
+  versions (=make versions= also runs in =make check=), builds with =make
+  dist= and publishes a release
+- [X] macOS groundwork: cross-compiles for both chips; every test passes
+  with a symlinked temp directory, as macOS has (=/var= → =/private/var=)
+- [X] =make check= clean: 108 ERT tests, Go tests with the race detector,
+  versions and checkdoc
+- [ ] macOS run for real: by CI once the repo has a remote, or a tester
 - [ ] Your sign-off: a week of daily use on a real repository
-- [ ] macOS run by a tester
+** Visual gate (passed 20 Nov 2026)
+This milestone speaks protocol 0.6.0: =M-x claude-pair= offers to restart
+the M5 daemon.
+- [X] Set up from the README, in your real init file (not =emacs -Q=):
+  the =use-package= snippet and =C-c C= open the chat
+- [X] With your API key: =M-x setenv RET ANTHROPIC_API_KEY RET=, then
+  =C-u M-x claude-pair=: the new chat answers, with no daemon restart
+- [ ] Later, when your account is back: =C-u M-x setenv RET ANTHROPIC_API_KEY
+  RET= (removes it), =C-u M-x claude-pair=: the new chat uses your login
+- [ ] Optional: =make dist=, then point =claude-pair-daemon-command= at
+  =dist/claude-paird-0.1.0-linux-amd64= and chat as usual

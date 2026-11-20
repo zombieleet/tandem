@@ -1,0 +1,27 @@
+# make check on Linux and macOS, on the oldest Emacs the package supports
+# and the current one. The tests never call a model: they use the fake
+# claude in daemon/internal/testutil/fakeclaude.
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        emacs: ["29.1", "30.1"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+      - uses: purcell/setup-emacs@master
+        with:
+          version: ${{ matrix.emacs }}
+      - run: make check

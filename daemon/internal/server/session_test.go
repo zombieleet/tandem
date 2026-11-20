@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -225,3 +227,60 @@ func TestStopEndsRunningSessions(t *testing.T) {
 }
 
 func errClosedForTest() error { return session.ErrClosed }
+
+func TestSessionEnvironment(t *testing.T) {
+	t.Setenv("CP_TEST_INHERITED", "daemon")
+	t.Setenv("CP_TEST_REMOVED", "daemon")
+	d := startDaemon(t, 0, "cpd-")
+	c := ready(t, d)
+	m := c.request("session/new", map[string]any{"cwd": t.TempDir(), "claudePath": fakeClaude,
+		"env": map[string]any{"CP_TEST_SET": "from emacs", "CP_TEST_REMOVED": nil}})
+	wantOK(t, m)
+	var r struct{ SessionID string }
+	json.Unmarshal(m.Result, &r)
+	prompt(t, c, r.SessionID, "script:env:CP_TEST_SET,CP_TEST_REMOVED,CP_TEST_INHERITED")
+	if got := turnText(c.untilIdle(r.SessionID)); got != "CP_TEST_SET=from emacs CP_TEST_REMOVED unset CP_TEST_INHERITED=daemon" {
+		t.Fatalf("text %q", got)
+	}
+	wantCode(t, c.request("session/new", map[string]any{"cwd": t.TempDir(), "claudePath": fakeClaude,
+		"env": map[string]any{"A=B": "x"}}), protocol.InvalidParams)
+}
+
+func TestTheLogNeverHoldsEnvironmentValues(t *testing.T) {
+	var log strings.Builder
+	var mu sync.Mutex
+	d := startDaemonWithLog(t, func(p []byte) { mu.Lock(); log.Write(p); mu.Unlock() })
+	c := ready(t, d)
+	m := c.request("session/new", map[string]any{"cwd": t.TempDir(), "claudePath": fakeClaude,
+		"env": map[string]any{"ANTHROPIC_API_KEY": "sk-secret-value"}})
+	wantOK(t, m)
+	var r struct{ SessionID string }
+	json.Unmarshal(m.Result, &r)
+	prompt(t, c, r.SessionID, "script:hello")
+	c.untilIdle(r.SessionID)
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Contains(log.String(), "sk-secret-value") {
+		t.Fatal("the daemon log holds an environment value")
+	}
+}
+
+type writeFunc func([]byte)
+
+func (f writeFunc) Write(p []byte) (int, error) { f(p); return len(p), nil }
+
+// startDaemonWithLog starts a daemon whose debug log goes to write.
+func startDaemonWithLog(t *testing.T, write func([]byte)) *Daemon {
+	t.Helper()
+	d := New(Options{
+		SocketPath: filepath.Join(privateDir(t, "cpd-"), "d.sock"),
+		Version:    "9.9.9-test",
+		HelperPath: helperBinary,
+		Log:        slog.New(slog.NewTextHandler(writeFunc(write), &slog.HandlerOptions{Level: slog.LevelDebug})),
+	})
+	if err := d.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Stop("test cleanup") })
+	return d
+}

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -370,12 +371,18 @@ func (d *Daemon) initialize(c *client, params json.RawMessage) (any, error) {
 // registers a session. Claude starts with the first prompt.
 func (d *Daemon) newSession(c *client, params json.RawMessage) (any, error) {
 	var p struct {
-		Cwd        string `json:"cwd"`
-		ClaudePath string `json:"claudePath"`
-		Model      string `json:"model"`
+		Cwd        string             `json:"cwd"`
+		ClaudePath string             `json:"claudePath"`
+		Model      string             `json:"model"`
+		Env        map[string]*string `json:"env"`
 	}
 	if len(params) == 0 || json.Unmarshal(params, &p) != nil {
 		return nil, rpc.Errorf(protocol.InvalidParams, "session/new needs cwd and claudePath")
+	}
+	for name := range p.Env {
+		if name == "" || strings.ContainsAny(name, "=\x00") {
+			return nil, rpc.Errorf(protocol.InvalidParams, "env has a bad variable name %q", name)
+		}
 	}
 	if info, err := os.Stat(p.Cwd); !filepath.IsAbs(p.Cwd) || err != nil || !info.IsDir() {
 		return nil, rpc.Errorf(protocol.InvalidParams, "cwd must be an existing absolute directory, got %q", p.Cwd)
@@ -390,6 +397,7 @@ func (d *Daemon) newSession(c *client, params json.RawMessage) (any, error) {
 		Cwd:        p.Cwd,
 		ClaudePath: p.ClaudePath,
 		Model:      p.Model,
+		Env:        p.Env,
 		HelperCommand: []string{d.opts.HelperPath, "mcp",
 			"--socket", d.opts.SocketPath, "--session", id},
 		Log:    d.opts.Log,

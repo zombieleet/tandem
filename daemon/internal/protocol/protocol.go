@@ -8,7 +8,7 @@ import (
 )
 
 // Version is the protocol version this daemon speaks.
-const Version = "0.5.0"
+const Version = "0.6.0"
 
 // JSON-RPC error codes, standard and claude-pair specific.
 const (

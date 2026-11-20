@@ -1,0 +1,33 @@
+# Pushing a tag vX.Y.Z checks that it matches the daemon's and the
+# package's version, builds the daemons with make dist and publishes them,
+# with SHA256SUMS, as a GitHub release.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+      - name: Check the tag matches the version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          daemon="$(make -s print-version)"
+          package="$(sed -n 's/^;; Version: //p' lisp/claude-pair.el)"
+          if [ "$tag" != "$daemon" ] || [ "$tag" != "$package" ]; then
+            echo "tag $tag, daemon $daemon, package $package: they must match"; exit 1
+          fi
+      - run: make dist
+      - run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

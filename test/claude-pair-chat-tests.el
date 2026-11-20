@@ -276,5 +276,29 @@
       (let ((err (should-error (claude-pair) :type 'user-error)))
         (should (string-match-p "2\\.0\\.9 is too old" (cadr err)))))))
 
+(ert-deftest claude-pair-chat-a-new-session-takes-the-environment-from-emacs ()
+  (claude-pair-test-with-project
+    (let ((process-environment (append '("CP_TEST_KEY=one" "CP_TEST_GONE=daemon") process-environment))
+          (claude-pair-environment-variables '("CP_TEST_KEY" "CP_TEST_GONE"))
+          (second nil))
+      (unwind-protect
+          (progn
+            (setq buffer (claude-pair))
+            (claude-pair-test--say buffer "script:env:CP_TEST_KEY,CP_TEST_GONE,HOME")
+            (with-current-buffer buffer
+              (should (string-match-p "CP_TEST_KEY=one CP_TEST_GONE=daemon HOME=/"
+                                      (claude-pair-test--transcript))))
+            ;; Changed in Emacs after the daemon started: a new session sees it.
+            (let ((pid (claude-pair-test--pid)))
+              (setenv "CP_TEST_KEY" "two")
+              (setenv "CP_TEST_GONE" nil)
+              (setq second (claude-pair t))
+              (claude-pair-test--say second "script:env:CP_TEST_KEY,CP_TEST_GONE")
+              (with-current-buffer second
+                (should (string-match-p "CP_TEST_KEY=two CP_TEST_GONE unset"
+                                        (claude-pair-test--transcript))))
+              (should (eql (claude-pair-test--pid) pid))))
+        (when (buffer-live-p second) (kill-buffer second))))))
+
 (provide 'claude-pair-chat-tests)
 ;;; claude-pair-chat-tests.el ends here
