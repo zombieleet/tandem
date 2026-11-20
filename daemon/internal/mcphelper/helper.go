@@ -1,6 +1,7 @@
 // Package mcphelper is "claude-paird mcp": an MCP server that Claude Code
 // starts over stdio. It answers Claude Code's permission prompts, and later
-// the Emacs tools, by relaying each call to the daemon over its socket.
+// Claude's edit and window tools, by relaying each call to the daemon over
+// its socket.
 package mcphelper
 
 import (
@@ -28,7 +29,39 @@ const (
 	PermissionToolName = "mcp__" + ServerName + "__" + PermissionTool
 	EditToolName       = "mcp__" + ServerName + "__edit_file"
 	WriteToolName      = "mcp__" + ServerName + "__write_file"
+
+	OpenFileToolName    = "mcp__" + ServerName + "__open_file"
+	CloseWindowToolName = "mcp__" + ServerName + "__close_window"
+	ListWindowsToolName = "mcp__" + ServerName + "__list_windows"
 )
+
+// LayoutToolNames are the window tools. They change only what the user
+// sees, never a file, so they run without asking.
+var LayoutToolNames = []string{OpenFileToolName, CloseWindowToolName, ListWindowsToolName}
+
+// IsLayoutTool reports whether name is one of LayoutToolNames.
+func IsLayoutTool(name string) bool {
+	for _, n := range LayoutToolNames {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// OpenFileArgs are open_file's inputs.
+type OpenFileArgs struct {
+	Path string `json:"path" jsonschema:"The file to show: an absolute path, or one relative to the project root"`
+	Line int    `json:"line,omitempty" jsonschema:"The line to show, counting from 1"`
+}
+
+// CloseWindowArgs are close_window's inputs.
+type CloseWindowArgs struct {
+	Window int `json:"window" jsonschema:"The window's id, from list_windows or open_file"`
+}
+
+// ListWindowsArgs are list_windows' inputs: none.
+type ListWindowsArgs struct{}
 
 // EditArgs are edit_file's inputs, the same as Claude Code's built-in Edit.
 type EditArgs struct {
@@ -122,6 +155,46 @@ func Run(ctx context.Context, socketPath, sessionID string, log *slog.Logger) er
 			"Use this instead of the built-in Write tool.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, a WriteArgs) (*mcp.CallToolResult, any, error) {
 		return relay(ctx, map[string]any{"kind": "write", "filePath": a.FilePath, "content": a.Content})
+	})
+	emacs := func(ctx context.Context, tool string, args map[string]any) (*mcp.CallToolResult, any, error) {
+		raw, err := conn.Call(ctx, "helper/emacs", map[string]any{"sessionId": sessionID, "tool": tool, "args": args})
+		var r editResult
+		if err == nil {
+			err = json.Unmarshal(raw, &r)
+		}
+		if err != nil {
+			r = editResult{Text: "claude-pair could not reach Emacs (" + err.Error() + ").", IsError: true}
+		}
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: r.Text}}, IsError: r.IsError}, nil, nil
+	}
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "open_file",
+		Description: "Shows a file in a window of the user's Emacs, optionally at a line, so the user sees what " +
+			"you are talking about. Emacs keeps at most 5 windows: below that it splits one, at the limit it " +
+			"reuses the window you used least recently. It never moves the user's cursor or takes over the " +
+			"window the user is working in. You do not need it to read a file yourself; use it to show the " +
+			"user something. Only files inside the project.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, a OpenFileArgs) (*mcp.CallToolResult, any, error) {
+		args := map[string]any{"path": a.Path}
+		if a.Line > 0 {
+			args["line"] = a.Line
+		}
+		return emacs(ctx, "open_file", args)
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "close_window",
+		Description: "Closes a window you opened in the user's Emacs, given its id from list_windows or " +
+			"open_file. You can close only windows you opened, never the user's or the chat's, never one the " +
+			"user is working in, and never below 2 windows.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, a CloseWindowArgs) (*mcp.CallToolResult, any, error) {
+		return emacs(ctx, "close_window", map[string]any{"window": a.Window})
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "list_windows",
+		Description: "Lists the windows of the user's Emacs: each one's id, what it shows and which lines, " +
+			"the one the user is working in, and the ones you opened and may close.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ ListWindowsArgs) (*mcp.CallToolResult, any, error) {
+		return emacs(ctx, "list_windows", map[string]any{})
 	})
 	return server.Run(ctx, &mcp.StdioTransport{})
 }

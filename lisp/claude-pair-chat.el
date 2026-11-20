@@ -48,6 +48,7 @@
 
 ;;; Code:
 
+(require 'claude-pair-layout)
 (require 'claude-pair-rpc)
 (require 'claude-pair-review)
 (require 'project)
@@ -231,7 +232,11 @@ Type after the prompt at the bottom and press \\[claude-pair-chat-send]."
     buffer))
 
 (defun claude-pair-chat--display (buffer)
-  "Show BUFFER in a side window on the right and select it."
+  "Show BUFFER in a side window on the right and select it.
+Unless it is visible already, first switch to Claude's tab; see
+`claude-pair-layout-tab'."
+  (claude-pair-layout-enable)
+  (claude-pair-layout-enter-tab buffer)
   (let ((window (display-buffer
                  buffer
                  `((display-buffer-in-side-window)
@@ -496,15 +501,18 @@ when the daemon refused a path outside the project."
 (defun claude-pair-chat--alert (update)
   "Make sure the user notices the permission question in UPDATE."
   (let ((buffer (current-buffer)))
-    (unless (get-buffer-window buffer 'visible)
+    (unless (or (get-buffer-window buffer 'visible)
+                ;; Your other tabs are never touched; the message says where.
+                (claude-pair-layout-elsewhere-p))
       (display-buffer buffer
                       `((display-buffer-in-side-window)
                         (side . right) (slot . 0)
                         (window-width . ,claude-pair-chat-window-width)
                         (inhibit-switch-frame . t))))
-    (message "claude-pair: Claude wants to %s %s.  In the chat, y allows, a always allows, n denies."
+    (message "claude-pair: Claude wants to %s %s.  In the chat%s, y allows, a always allows, n denies."
              (claude-pair-chat--verb (plist-get update :toolName))
-             (claude-pair-chat--subject update))))
+             (claude-pair-chat--subject update)
+             (claude-pair-layout-where-text))))
 
 (defun claude-pair-chat--on-disconnect ()
   "Tell every chat buffer that the daemon connection closed."

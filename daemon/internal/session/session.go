@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -52,7 +53,11 @@ const EditingPrompt = "You are running inside claude-pair, which connects you to
 	mcphelper.WriteToolName + "; the built-in Edit, Write and NotebookEdit tools are turned off. " +
 	"The user reviews every edit in Emacs, where the file may have unsaved changes, so old_string must " +
 	"match what you last read. If the user rejects an edit, read their note and adjust instead of " +
-	"sending the same change again. Use absolute paths inside the project."
+	"sending the same change again. Use absolute paths inside the project. " +
+	"To show the user a file or the lines you are talking about, call " + mcphelper.OpenFileToolName +
+	" with a line; do not open files only to read them. The user's Emacs keeps at most 5 windows; " +
+	mcphelper.ListWindowsToolName + " lists them and " + mcphelper.CloseWindowToolName +
+	" closes the ones you opened."
 
 // helperTimeoutMs is how long one MCP call may take: 24 hours.
 const helperTimeoutMs = 24 * 60 * 60 * 1000
@@ -235,7 +240,8 @@ func (s *Session) Args(resume bool) []string {
 			"--permission-prompt-tool", mcphelper.PermissionToolName,
 			// The user reviews every edit in Emacs; a second question first
 			// would only be noise.
-			"--allowedTools", mcphelper.EditToolName+","+mcphelper.WriteToolName,
+			"--allowedTools", strings.Join(append([]string{mcphelper.EditToolName, mcphelper.WriteToolName},
+				mcphelper.LayoutToolNames...), ","),
 			"--append-system-prompt", EditingPrompt)
 	} else {
 		args = append(args, "--permission-prompts", "none")

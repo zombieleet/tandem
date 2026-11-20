@@ -44,6 +44,7 @@
 
 ;;; Code:
 
+(require 'claude-pair-layout)
 (require 'claude-pair-rpc)
 (require 'seq)
 (require 'subr-x)
@@ -297,19 +298,6 @@ at their start and end; MIDDLE is the part of NEW between them."
           (push (cons (match-beginning 0) (match-end 0)) found))
         (nreverse found)))))
 
-(defun claude-pair-review--buffer (path)
-  "Return a buffer visiting PATH, without running unsafe local variables."
-  (or (find-buffer-visiting path)
-      (let* ((enable-local-variables :safe)
-             (inhibit-message t)
-             (buffer (find-file-noselect path)))
-        ;; A new file in a directory that does not exist yet is not
-        ;; writable until the directory is made, which happens on saving.
-        (unless (file-exists-p path)
-          (with-current-buffer buffer
-            (setq buffer-read-only nil)))
-        buffer)))
-
 (defun claude-pair-review--answer (id outcome &rest fields)
   "Tell the daemon how edit ID ended: OUTCOME, plus FIELDS."
   (let ((message (or (plist-get fields :message) "")))
@@ -376,7 +364,7 @@ please provide more context to uniquely identify the instance.\nString: %s"
   (let* ((id (plist-get params :requestId))
          (path (plist-get params :filePath))
          (buffer (condition-case err
-                     (claude-pair-review--buffer path)
+                     (claude-pair-layout-file-buffer path)
                    (error (claude-pair-review--answer
                            id "error" :message (format "Emacs could not open %s: %s"
                                                        path (error-message-string err)))
@@ -457,9 +445,15 @@ read-only text, so it can be scrolled through and read like code."
       (add-hook 'before-save-hook #'claude-pair-review--before-save -100 t)
       (add-hook 'after-save-hook #'claude-pair-review--after-save 100 t)
       (add-hook 'before-revert-hook #'claude-pair-review--before-revert nil t)
-      (claude-pair-review--display (current-buffer) (overlay-start banner))
-      (message "claude-pair: Claude proposes an edit to %s; C-c C-a applies it, C-c C-k rejects it"
-               (file-name-nondirectory path)))))
+      ;; Where the chat is, else in the selected frame: Claude is waiting for you.
+      ;; Where the chat is.  When it is not shown, Claude is waiting for
+      ;; you, so show it where you are, unless you are in another tab than
+      ;; Claude's: your tabs are never touched.
+      (claude-pair-layout-show (current-buffer) :pos (overlay-start banner)
+                               :session (plist-get params :sessionId)
+                               :fallback (not (claude-pair-layout-elsewhere-p)))
+      (message "claude-pair: Claude proposes an edit to %s%s; C-c C-a applies it, C-c C-k rejects it"
+               (file-name-nondirectory path) (claude-pair-layout-where-text)))))
 
 (defun claude-pair-review--place (proposal)
   "Fit PROPOSAL's banner and its key overlay around its text."
@@ -473,18 +467,6 @@ read-only text, so it can be scrolled through and read like code."
                               (if (and (bolp) (> (point) bol)) (point) (line-end-position)))))
     (move-overlay (plist-get proposal :banner) bol bol)
     (move-overlay (plist-get proposal :region) bol eol)))
-
-(defun claude-pair-review--display (buffer pos)
-  "Show BUFFER at POS without selecting its window or moving your point."
-  (let ((window (or (get-buffer-window buffer)
-                    (display-buffer buffer '((display-buffer-reuse-window
-                                              display-buffer-use-some-window
-                                              display-buffer-pop-up-window)
-                                             (inhibit-same-window . t))))))
-    (when (and window (not (eq window (selected-window))))
-      (set-window-point window pos)
-      (with-selected-window window
-        (recenter)))))
 
 ;;;; Deciding
 

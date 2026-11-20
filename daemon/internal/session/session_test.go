@@ -255,7 +255,7 @@ func TestHelperFlags(t *testing.T) {
 	for _, want := range []string{
 		`--mcp-config {"mcpServers":{"emacs":{"args":["mcp","--socket","/run/d.sock","--session","abc"],"command":"/bin/claude-paird","timeout":86400000,"type":"stdio"}}}`,
 		"--permission-prompt-tool mcp__emacs__permission",
-		"--allowedTools mcp__emacs__edit_file,mcp__emacs__write_file",
+		"--allowedTools mcp__emacs__edit_file,mcp__emacs__write_file,mcp__emacs__open_file,mcp__emacs__close_window,mcp__emacs__list_windows",
 		"--append-system-prompt " + EditingPrompt,
 	} {
 		if !strings.Contains(args, want) {
@@ -449,7 +449,11 @@ func TestToolTitles(t *testing.T) {
 		{"Bash", map[string]any{"command": "make test"}, "Bash make test"},
 		{"Grep", map[string]any{"pattern": "TODO", "path": "/work/proj/lisp"}, "Grep TODO in lisp"},
 		{"WebFetch", map[string]any{"url": "https://example.com"}, "WebFetch https://example.com"},
-		{"mcp__emacs__open_file", map[string]any{"path": "x"}, "emacs: open_file"},
+		{"mcp__github__create_issue", map[string]any{"title": "x"}, "github: create_issue"},
+		{"mcp__emacs__open_file", map[string]any{"path": "/work/proj/src/a.go", "line": 12.0}, "Show src/a.go:12"},
+		{"mcp__emacs__open_file", map[string]any{"path": "src/a.go"}, "Show src/a.go"},
+		{"mcp__emacs__close_window", map[string]any{"window": 3.0}, "Close window 3"},
+		{"mcp__emacs__list_windows", map[string]any{}, "List windows"},
 		{"Mystery", map[string]any{}, "Mystery"},
 		{"ToolSearch", map[string]any{"query": "select:mcp__emacs__edit_file"}, "ToolSearch select:mcp__emacs__edit_file"},
 		{"mcp__emacs__edit_file", map[string]any{"file_path": "/work/proj/a.txt"}, "Edit a.txt"},

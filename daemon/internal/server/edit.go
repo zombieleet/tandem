@@ -69,7 +69,7 @@ func (d *Daemon) proposeEdit(ctx context.Context, c *client, params json.RawMess
 	if e == nil {
 		return failed("The edit was not made: claude-pair has no such session.")
 	}
-	path, err := insideProject(e.s.Cwd(), p.FilePath)
+	path, err := insideProject(e.s.Cwd(), p.FilePath, "edits")
 	if err != nil {
 		return failed("The edit was not made: " + err.Error())
 	}
@@ -190,7 +190,7 @@ func (d *Daemon) answerEdit(c *client, params json.RawMessage) (any, error) {
 
 // insideProject returns path cleaned, or an error unless it is an absolute
 // path inside cwd. Symbolic links are resolved, so a link cannot lead out.
-func insideProject(cwd, path string) (string, error) {
+func insideProject(cwd, path, verb string) (string, error) {
 	if path == "" || !filepath.IsAbs(path) {
 		return "", errors.New("file_path must be an absolute path, got " + quote(path))
 	}
@@ -219,7 +219,7 @@ func insideProject(cwd, path string) (string, error) {
 	}
 	full := filepath.Join(existing, rest)
 	if rel, err := filepath.Rel(root, full); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return "", errors.New("claude-pair only edits files inside the project " + cwd + ", not " + clean)
+		return "", errors.New("claude-pair only " + verb + " files inside the project " + cwd + ", not " + clean)
 	}
 	return clean, nil
 }

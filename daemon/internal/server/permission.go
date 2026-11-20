@@ -49,7 +49,8 @@ func (d *Daemon) askPermission(ctx context.Context, c *client, params json.RawMe
 	if len(p.Input) == 0 || string(p.Input) == "null" {
 		p.Input = json.RawMessage("{}")
 	}
-	if p.ToolName == mcphelper.EditToolName || p.ToolName == mcphelper.WriteToolName {
+	if p.ToolName == mcphelper.EditToolName || p.ToolName == mcphelper.WriteToolName ||
+		mcphelper.IsLayoutTool(p.ToolName) {
 		// The edit tools ask the user themselves, inside Emacs.
 		return allow(p.Input, Rule{}, false), nil
 	}

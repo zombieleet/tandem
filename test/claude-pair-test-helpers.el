@@ -84,6 +84,7 @@ BUFFER is bound to nil for BODY to set; it is killed afterwards."
               (default-directory (file-name-as-directory project))
               (claude-pair-claude-command claude-pair-test--fake-claude)
               (claude-pair-model nil)
+              (claude-pair-layout-tab nil)
               (buffer nil))
          (unwind-protect
              (progn ,@body)

@@ -199,13 +199,13 @@ func TestInsideProject(t *testing.T) {
 	ok := []string{filepath.Join(dir, "a.go"), filepath.Join(dir, "sub", "b.go"), filepath.Join(dir, "new", "dir", "c.go"),
 		filepath.Join(dir, "sub", "..", "d.go")}
 	for _, p := range ok {
-		if _, err := insideProject(dir, p); err != nil {
+		if _, err := insideProject(dir, p, "edits"); err != nil {
 			t.Errorf("%s: %v", p, err)
 		}
 	}
 	bad := []string{"", "relative.go", "/etc/passwd", filepath.Join(dir, "..", "x.go"), dir + "-other/x.go"}
 	for _, p := range bad {
-		if _, err := insideProject(dir, p); err == nil {
+		if _, err := insideProject(dir, p, "edits"); err == nil {
 			t.Errorf("%s was accepted", p)
 		}
 	}

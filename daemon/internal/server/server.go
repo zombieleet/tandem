@@ -78,6 +78,7 @@ type Daemon struct {
 	sessions    map[string]*sessionEntry
 	permissions map[string]*pendingPermission
 	edits       map[string]*pendingEdit
+	tools       map[string]*pendingTool
 	nextClient  int
 	idle        *time.Timer
 	stopping    bool
@@ -101,6 +102,7 @@ func New(opts Options) *Daemon {
 		sessions:    map[string]*sessionEntry{},
 		permissions: map[string]*pendingPermission{},
 		edits:       map[string]*pendingEdit{},
+		tools:       map[string]*pendingTool{},
 		done:        make(chan struct{}),
 	}
 }
@@ -325,6 +327,10 @@ func (d *Daemon) handle(ctx context.Context, c *client, method string, params js
 		return d.proposeEdit(ctx, c, params)
 	case "edit/answer":
 		return d.answerEdit(c, params)
+	case "helper/emacs":
+		return d.callEmacs(ctx, c, params)
+	case "tool/result":
+		return d.answerTool(c, params)
 	default:
 		return nil, rpc.Errorf(protocol.MethodNotFound, "unknown method %s", method)
 	}

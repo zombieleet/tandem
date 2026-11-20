@@ -40,6 +40,7 @@
 
 (require 'claude-pair-rpc)
 (require 'claude-pair-chat)
+(require 'claude-pair-layout)
 (require 'claude-pair-review)
 
 ;;;###autoload

@@ -8,7 +8,9 @@
 // write:JSON, where JSON holds file (relative to the working directory),
 // old, new and all, or file and content. Edits call the emacs server's
 // edit_file or write_file over MCP, asking permission first unless
-// --allowedTools allows them. Any other prompt is echoed back.
+// --allowedTools allows them. mcp:TOOL:JSON calls the emacs server's TOOL
+// with the arguments JSON, the same way; several calls can be chained with
+// " && ". Any other prompt is echoed back.
 //
 // For bash and webfetch it asks --permission-prompt-tool through the MCP
 // server in --mcp-config, as Claude Code does, and applies "always" rules
@@ -170,6 +172,8 @@ func turn(prompt string, args []string) {
 		permissionScenario(name, arg)
 	case "edit", "write":
 		editScenario(name, arg)
+	case "mcp":
+		mcpScenario(arg)
 	case "sleepbash": // sleepbash:MS:CMD waits MS milliseconds, then asks to run CMD
 		ms, cmd, _ := strings.Cut(arg, ":")
 		n, _ := strconv.Atoi(ms)
@@ -352,6 +356,46 @@ func editScenario(name, arg string) {
 	logEvent("%s %s -> error=%v %s", tool, spec.File, isError, text)
 	toolResult(toolID, text, isError)
 	streamText([]string{"edit result: " + text}, 0)
+	result("success", false, nil)
+}
+
+// mcpScenario calls emacs tools, one per "TOOL:JSON" step, in one turn, and
+// reports each result as "TOOL result: TEXT" (with " (error)" on errors).
+func mcpScenario(arg string) {
+	var report []string
+	for i, step := range strings.Split(arg, " && ") {
+		name, rawArgs, _ := strings.Cut(step, ":")
+		args := map[string]any{}
+		if rawArgs != "" {
+			if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+				report = append(report, "bad mcp args: "+err.Error())
+				continue
+			}
+		}
+		tool := "mcp__emacs__" + name
+		toolID := fmt.Sprintf("toolu_m%d_%d", turns, i)
+		assistant(nextMsg(), map[string]any{"type": "tool_use", "id": toolID, "name": tool, "input": args})
+		if !allowed[tool] {
+			decision, err := ask(tool, args, toolID)
+			if err != nil || decision["behavior"] != "allow" {
+				toolResult(toolID, "permission denied", true)
+				report = append(report, name+" result: permission denied")
+				continue
+			}
+		}
+		text, isError, _, err := callTool(tool, args)
+		if err != nil {
+			text, isError = "tool call failed: "+err.Error(), true
+		}
+		logEvent("%s -> error=%v %s", tool, isError, text)
+		toolResult(toolID, text, isError)
+		line := name + " result: " + text
+		if isError {
+			line += " (error)"
+		}
+		report = append(report, line)
+	}
+	streamText([]string{strings.Join(report, "\n")}, 0)
 	result("success", false, nil)
 }
 

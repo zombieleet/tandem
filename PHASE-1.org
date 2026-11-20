@@ -363,23 +363,80 @@ Then =M-x claude-pair= in a scratch project.
   applies but nothing is saved behind your back
 - [X] Ask for a new file: it is created where Claude said
 
-* TODO M5 · Layout manager [0/6]
-- [ ] Claude tab; chat side window survives =C-x 1=
-- [ ] Windows Claude creates are tagged; Claude closes only its own
-- [ ] Limits: at least 2, at most 5 windows; at the limit, reuse Claude's
-  least recently used window
-- [ ] Focus guard: never selects a window, never moves point where you
-  typed in the last 3 seconds
-- [ ] MCP tools: =emacs_open_file=, =emacs_close_window=, =emacs_list_windows=
-- [ ] Edit review (M4) opens files through the layout manager
+* DONE M5 · Layout manager [6/6]
+- [X] Claude tab; chat side window survives =C-x 1=. =M-x claude-pair=
+  switches to a tab named "Claude" (=claude-pair-layout-tab=, nil to stay)
+  unless the chat is visible already. Claude works only in the frame and
+  tab where its chat is shown; elsewhere nothing is shown and Claude is
+  told the user is not looking
+- [X] Windows Claude creates are tagged (window parameter
+  =claude-pair-owner=, kept across tab switches); Claude closes only its
+  own, never yours or the chat
+- [X] Limits: at least 2, at most 5 windows, the chat included; a file
+  already shown is reused, else the largest window you are not using is
+  split, else at the limit Claude's least recently used window is reused
+  (yours only when Claude has none to reuse; it stays yours)
+- [X] Focus guard: never selects a window, never changes or scrolls the
+  window selected in its frame, and leaves alone a window you used in the
+  last 3 seconds (=claude-pair-focus-guard-seconds=)
+- [X] MCP tools =mcp__emacs__open_file=, =close_window=, =list_windows=
+  (the server name already says emacs, so no =emacs_= prefix). Relayed by
+  the daemon as =tool/call= / =tool/result= (protocol 0.5.0); the daemon
+  refuses paths outside the project; Emacs answers within 30 s. Each
+  answer tells Claude what happened and why, so it learns the rules
+- [X] Edit review (M4) opens files through the layout manager: where the
+  chat is. If the chat is not shown, it comes to you, since Claude is
+  waiting, except when you are in another tab than Claude's: then
+  nothing in your tab changes (nor for permission questions) and the
+  echo area says "in the Claude tab: C-x t o"
 ** Auto
-- [ ] ERT: window counting, limit error text, ownership, LRU choice,
-  focus guard timing
-** Visual gate (live)
-- [ ] Ask Claude to open 6 files: never more than 5 windows
-- [ ] Keep typing in your own window while Claude opens files: your
-  cursor never moves
-- [ ] =C-x 1= keeps the chat window
+- [X] ERT: window counting, limit texts, ownership, LRU choice, focus
+  guard timing, the tab, =C-x 1=, marks across a tab switch, unsafe local
+  variables, a proposal at the limit, and open_file for real through the
+  daemon and the fake claude (16 tests)
+- [X] Go: relay, chained calls, path refusal, timeout, only the asked
+  Emacs answers, Emacs disconnecting
+- [X] =make check= clean: 107 ERT tests, Go tests with the race detector,
+  0 checkdoc warnings
+** Interactive check run by Claude (real terminal Emacs in tmux, fake claude)
+- [X] =M-x claude-pair= typed as keys: a "Claude" tab opens beside yours,
+  chat on the right
+- [X] Five files shown while you type in =a.py=: 5 windows at most, your
+  text and line kept, =a.py= stays selected; line ranges exact on a
+  real display
+- [X] =C-x 1= keeps the chat; closing your window or the chat is refused,
+  Claude's two close, 2 windows stay
+- [X] In your own tab (=C-x t o=): open_file shows nothing there and
+  Claude is told so
+- [X] Found and fixed: an edit proposal arriving while you were in your
+  own tab opened a window there. Now your tab is left alone and the echo
+  area points to the Claude tab
+** Live checks run by Claude (20 Nov 2026, your login, about $0.29)
+- [X] Claude found the window tools on its own and showed b.py to f.py
+  each at =main= (line 36)
+- [X] Never more than 5 windows (counted at every split); e.py and f.py
+  reused the windows Claude used least recently, and Claude explained so
+- [X] Your =a.py= window in the Claude tab kept its buffer and point; your
+  own tab still had one window on =a.py=, point unchanged
+- [X] An edit proposal at the limit reused one of Claude's windows
+- [X] "Close every window you opened": Claude closed its 3 and stopped at 2
+- [X] Found and fixed: the line range in =list_windows= could run past the
+  window (batch has no display); it is now capped by the window's height
+** Visual gate (passed 20 Nov 2026)
+This milestone speaks protocol 0.5.0: =M-x claude-pair= offers to restart
+an older daemon.
+: make daemon
+: emacs -Q -L ~/personal-projects/claude-pair/lisp --eval "(require 'claude-pair)"
+Then open a file in a project and =M-x claude-pair=.
+- [X] A "Claude" tab opens with your file and the chat; your first tab is
+  untouched
+- [X] Ask Claude to show you 6 files: never more than 5 windows, and
+  Claude says which windows it reused
+- [X] Keep typing in your own window while Claude opens files: your
+  cursor never moves and your window is never replaced
+- [X] =C-x 1= keeps the chat window
+- [X] Ask Claude to close its windows: it stops at 2, yours and the chat
+- [X] Switch to your first tab while Claude works: nothing appears there
 
 * TODO M6 · Phase 1 wrap-up [0/5]
 - [ ] README: install, configure, suggested key binding

@@ -6,10 +6,11 @@ in its headless stream-json mode. Emacs is the client: a chat buffer, Claude's
 edits reviewed in your real buffers, and windows Claude opens for you within
 limits you set.
 
-**Status:** phase 1, milestone 4. You can chat with Claude about a project,
-watch its tool calls, stop an answer, allow or deny each command, and review
-every edit Claude proposes in the file's own buffer before it happens. See
-[PHASE-1.org](PHASE-1.org).
+**Status:** phase 1, milestone 5. You can chat with Claude about a project,
+watch its tool calls, stop an answer, allow or deny each command, review
+every edit Claude proposes in the file's own buffer before it happens, and
+let Claude show you files in up to 5 windows without ever taking your cursor.
+See [PHASE-1.org](PHASE-1.org).
 
 ## Requirements
 
@@ -92,6 +93,31 @@ local variables ignored, and only files inside the project can be edited.
 If the file is reloaded from disk while a proposal is shown (`revert-buffer`,
 auto-revert), the proposal is dropped and Claude is told to read the file
 again.
+
+## Claude's windows
+
+`M-x claude-pair` opens the chat in a tab of its own, named "Claude"
+(`claude-pair-layout-tab`; nil keeps the current tab). Claude works only in
+the frame and tab where its chat is shown, so your other tabs keep their
+layout. When you look elsewhere, Claude is told that nothing can be shown.
+
+Claude shows you files with its `open_file` tool, at the line it is talking
+about. These rules hold whatever Claude asks for:
+
+- **At most 5 windows** (`claude-pair-max-windows`), the chat included.
+  Claude uses a window that already shows the file, else splits the largest
+  window, else reuses the window it used least recently.
+- **At least 2** (`claude-pair-min-windows`). Windows Claude split off are
+  its own; it can close only those, never yours or the chat.
+- **Focus guard.** Claude never selects a window, never changes or scrolls
+  the window you are in, and leaves alone any window you used in the last 3
+  seconds (`claude-pair-focus-guard-seconds`).
+- `C-x 1` keeps the chat window.
+
+Edit proposals open by the same rules. When the chat is not shown, an
+edit proposal or permission question comes to you, since Claude is waiting
+for you, except when you are in another tab than Claude's: then your tab is
+left alone and the echo area tells you to switch (`C-x t o`).
 
 ## Permission questions
 

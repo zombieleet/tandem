@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 )
@@ -42,6 +43,19 @@ func ToolTitle(name string, input map[string]any, cwd string) string {
 		return "Edit " + relative(str("file_path"), cwd)
 	case "mcp__emacs__write_file":
 		return "Write " + relative(str("file_path"), cwd)
+	case "mcp__emacs__open_file":
+		title := "Show " + relative(str("path"), cwd)
+		if line, ok := input["line"].(float64); ok && line > 0 {
+			title += fmt.Sprintf(":%d", int(line))
+		}
+		return title
+	case "mcp__emacs__close_window":
+		if id, ok := input["window"].(float64); ok {
+			return fmt.Sprintf("Close window %d", int(id))
+		}
+		return "Close a window"
+	case "mcp__emacs__list_windows":
+		return "List windows"
 	default:
 		if server, tool, ok := strings.Cut(strings.TrimPrefix(name, "mcp__"), "__"); ok && strings.HasPrefix(name, "mcp__") {
 			return server + ": " + tool

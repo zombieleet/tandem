@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.4.0**. This document is the contract between the Emacs client
+Version **0.5.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -130,8 +130,9 @@ claude -p --input-format stream-json --output-format stream-json --verbose
            "command":"<claude-paird>","args":["mcp","--socket",S,"--session",ID],
            "timeout":86400000}}}'
        --permission-prompt-tool mcp__emacs__permission
-       --allowedTools mcp__emacs__edit_file,mcp__emacs__write_file
-       --append-system-prompt "<how files change in claude-pair>"
+       --allowedTools mcp__emacs__edit_file,mcp__emacs__write_file,
+                      mcp__emacs__open_file,mcp__emacs__close_window,mcp__emacs__list_windows
+       --append-system-prompt "<how files change and windows work in claude-pair>"
        [--model M] (--session-id ID | --resume ID)
 ```
 
@@ -242,6 +243,33 @@ review itself is the question, and no permission rule can skip it.
 6. A cancelled turn, a closed session, a stopping daemon or a departed helper
    withdraws the edit: the reviewing client gets `edit/withdraw` `{requestId,
    reason}` and followers get `state: "withdrawn"`.
+
+## Windows
+
+Claude shows the user files through three more helper tools, in
+`--allowedTools` because they change only what the user sees:
+
+| Tool | Inputs |
+|---|---|
+| `open_file` | `path` (absolute, or relative to the project), `line` (optional, from 1) |
+| `close_window` | `window`, an id from `list_windows` or `open_file` |
+| `list_windows` | none |
+
+1. The helper sends `helper/emacs` `{sessionId, tool, args}` and waits.
+2. For `open_file` the daemon makes `path` absolute and refuses, as an error
+   result, one outside the session's directory (symbolic links resolved).
+3. The daemon sends the notification `tool/call` `{requestId, sessionId,
+   tool, args, root}` to the client that answers for the session; `root` is
+   the session's directory.
+4. The client applies its window rules and answers with `tool/result`
+   `{requestId, text, isError}`. Only the client the call went to may
+   answer; others get `-32006`. `text` is what Claude reads, so it says what
+   happened and why, such as "Window 2 is the user's, so it stays open".
+5. If the client does not answer within 30 seconds, or disconnects first,
+   Claude gets an error result saying so.
+
+The window rules live in the client, not the daemon; the Emacs client's
+are described in its README.
 
 ### `shutdown` (client → daemon)
 
