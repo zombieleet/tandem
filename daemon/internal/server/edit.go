@@ -25,7 +25,7 @@ import (
 // the proposal (edit/withdraw).
 
 type editAnswer struct {
-	Outcome string `json:"outcome"` // applied, rejected, partial or error
+	Outcome string `json:"outcome"` // applied, rejected, partial, question or error
 	Message string `json:"message"`
 	Saved   bool   `json:"saved"`
 	Created bool   `json:"created"`
@@ -39,7 +39,7 @@ type hunkDecision struct {
 	Line     int    `json:"line"` // where the hunk started when proposed
 	OldLines int    `json:"oldLines"`
 	NewLines int    `json:"newLines"`
-	Decision string `json:"decision"` // applied, rejected or error
+	Decision string `json:"decision"` // applied, rejected, error, asked or undecided
 	Note     string `json:"note"`
 	Saved    bool   `json:"saved"`
 }
@@ -166,6 +166,8 @@ func editOutcome(rel string, a editAnswer) toolResult {
 		return toolResult{Text: text + " Do not send the same change again.", IsError: true}
 	case "partial":
 		return toolResult{Text: partialOutcome(rel, a), IsError: true}
+	case "question":
+		return toolResult{Text: questionOutcome(rel, a)}
 	default:
 		message := a.Message
 		if message == "" {
@@ -224,6 +226,60 @@ func partialOutcome(rel string, a editAnswer) string {
 	return b.String()
 }
 
+// questionOutcome tells Claude the user asked about a hunk before deciding
+// the rest, so it answers first and proposes what is still wanted again.
+func questionOutcome(rel string, a editAnswer) string {
+	var asked hunkDecision
+	for _, h := range a.Hunks {
+		if h.Decision == "asked" {
+			asked = h
+		}
+	}
+	var b strings.Builder
+	where := "your edit to " + rel
+	if len(a.Hunks) > 1 {
+		where = fmt.Sprintf("hunk %d of your edit to %s (%s)", asked.Index, rel, hunkPlace(asked))
+	}
+	fmt.Fprintf(&b, "Before deciding, the user asks you a question about %s:\n\n%s\n\n", where, a.Message)
+	b.WriteString("Answer the question in your reply.")
+	var applied, open []string
+	for _, h := range a.Hunks {
+		name := fmt.Sprintf("hunk %d", h.Index)
+		switch h.Decision {
+		case "applied":
+			applied = append(applied, name)
+		case "rejected":
+			text := " Hunk " + fmt.Sprint(h.Index) + " was rejected; those lines are unchanged."
+			if h.Note != "" {
+				text += " Their note: " + h.Note
+			}
+			b.WriteString(text)
+		default:
+			open = append(open, name)
+		}
+	}
+	if len(applied) > 0 {
+		fmt.Fprintf(&b, " Already applied: %s.", strings.Join(applied, ", "))
+	}
+	if len(a.Hunks) == 1 {
+		b.WriteString(" The edit is not applied.")
+	} else if len(open) > 0 {
+		fmt.Fprintf(&b, " Not applied, because the user has not decided on them: %s.", strings.Join(open, ", "))
+	}
+	b.WriteString(" If you still want what was not applied, propose it again after answering, revised if " +
+		"the question calls for it, with a new edit based on the file as it is now.")
+	return b.String()
+}
+
+// hunkPlace says where a hunk was, such as "1 line at line 9, becoming 2 lines".
+func hunkPlace(h hunkDecision) string {
+	place := fmt.Sprintf("%s at line %d", plural(h.OldLines, "line"), h.Line)
+	if h.NewLines != h.OldLines {
+		place += fmt.Sprintf(", becoming %s", plural(h.NewLines, "line"))
+	}
+	return place
+}
+
 func plural(n int, word string) string {
 	if n == 1 {
 		return "1 " + word
@@ -240,12 +296,16 @@ func (d *Daemon) answerEdit(c *client, params json.RawMessage) (any, error) {
 		editAnswer
 	}
 	if len(params) == 0 || json.Unmarshal(params, &p) != nil || p.RequestID == "" ||
-		(p.Outcome != "applied" && p.Outcome != "rejected" && p.Outcome != "partial" && p.Outcome != "error") {
+		(p.Outcome != "applied" && p.Outcome != "rejected" && p.Outcome != "partial" &&
+			p.Outcome != "question" && p.Outcome != "error") {
 		return nil, rpc.Errorf(protocol.InvalidParams,
-			`edit/answer needs a requestId and an outcome of "applied", "rejected", "partial" or "error"`)
+			`edit/answer needs a requestId and an outcome of "applied", "rejected", "partial", "question" or "error"`)
 	}
-	if p.Outcome == "partial" && len(p.Hunks) == 0 {
-		return nil, rpc.Errorf(protocol.InvalidParams, `a "partial" edit/answer needs its hunks`)
+	if (p.Outcome == "partial" || p.Outcome == "question") && len(p.Hunks) == 0 {
+		return nil, rpc.Errorf(protocol.InvalidParams, `a %q edit/answer needs its hunks`, p.Outcome)
+	}
+	if p.Outcome == "question" && strings.TrimSpace(p.Message) == "" {
+		return nil, rpc.Errorf(protocol.InvalidParams, `a "question" edit/answer needs the question as its message`)
 	}
 	d.mu.Lock()
 	req := d.edits[p.RequestID]

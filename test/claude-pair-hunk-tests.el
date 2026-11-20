@@ -253,6 +253,97 @@
       (should (string-match-p "◐ Applied 1 of 2 hunks, saved" text))
       (should (string-match-p "✗ hunk 2 (line 9) rejected: keep nine" text)))))
 
+;;;; Asking Claude about a hunk
+
+(ert-deftest claude-pair-hunk-asking-sends-the-edit-back-with-the-question ()
+  (claude-pair-test-with-file claude-pair-test--ten
+    (claude-pair-test--two-hunks file)
+    (with-current-buffer (find-buffer-visiting file)
+      (claude-pair-test--goto-hunk 1)
+      (claude-pair-review-apply-hunk)
+      (claude-pair-test--goto-hunk 2)
+      (should (eq (key-binding (kbd "C-c '")) #'claude-pair-review-ask-hunk))
+      (claude-pair-review-ask-hunk "why two lines?")
+      ;; Decided hunks keep their decision; the asked one is not applied.
+      (should (string-match-p "TWO" (buffer-string)))
+      (should (string-match-p "line 9\nline 10" (buffer-string)))
+      (should-not (claude-pair-review-pending-p "e1"))
+      (let ((answer (car claude-pair-test--answers)))
+        (should (equal (plist-get answer :outcome) "question"))
+        (should (equal (plist-get answer :message) "why two lines?"))
+        (should (equal (mapcar (lambda (h) (plist-get h :decision)) (plist-get answer :hunks))
+                       '("applied" "asked"))))
+      ;; A note sits where the hunk was.
+      (let ((note (seq-find (lambda (ov) (overlay-get ov 'claude-pair-note))
+                            (overlays-in (point-min) (point-max)))))
+        (should note)
+        (should (string-match-p "@claude why two lines\\?" (overlay-get note 'before-string)))
+        (should (string-match-p "Claude: …" (overlay-get note 'before-string)))
+        (should (equal (line-number-at-pos (overlay-start note)) 9))
+        ;; Claude's answer streams into it.
+        (claude-pair-review-note-append "e1" "Because the loop needs ")
+        (claude-pair-review-note-append "e1" "its own line.")
+        (claude-pair-review-note-done "e1")
+        (should (string-match-p "Claude: Because the loop needs its own line\\."
+                                (overlay-get note 'before-string)))
+        ;; Not part of the file.
+        (should-not (string-match-p "@claude" (buffer-string)))
+        (claude-pair-review-dismiss-note)
+        (should-not (overlay-buffer note))))))
+
+(ert-deftest claude-pair-hunk-asking-leaves-the-other-hunks-undecided ()
+  (claude-pair-test-with-file claude-pair-test--ten
+    (claude-pair-test--two-hunks file)
+    (with-current-buffer (find-buffer-visiting file)
+      (claude-pair-test--goto-hunk 1)
+      (claude-pair-review-ask-hunk "is TWO right?")
+      (should (equal (buffer-string) claude-pair-test--ten))
+      (should (equal (mapcar (lambda (h) (plist-get h :decision))
+                             (plist-get (car claude-pair-test--answers) :hunks))
+                     '("asked" "undecided")))
+      (should-error (claude-pair-review-ask-hunk "") :type 'user-error)
+      (claude-pair-review-dismiss-note))))
+
+(ert-deftest claude-pair-hunk-a-long-answer-points-to-the-chat ()
+  (claude-pair-test-with-file claude-pair-test--ten
+    (claude-pair-test--two-hunks file)
+    (with-current-buffer (find-buffer-visiting file)
+      (claude-pair-test--goto-hunk 1)
+      (let ((claude-pair-review-note-lines 2))
+        (claude-pair-review-ask-hunk "explain")
+        (claude-pair-review-note-append "e1" "one\ntwo\nthree\nfour")
+        (let ((text (overlay-get (plist-get (gethash "e1" claude-pair-review--notes) :overlay)
+                                 'before-string)))
+          (should (string-match-p "Claude: one" text))
+          (should (string-match-p "two" text))
+          (should-not (string-match-p "three" text))
+          (should (string-match-p "the rest is in the chat" text))))
+      (claude-pair-review-dismiss-note))))
+
+(ert-deftest claude-pair-hunk-the-chat-feeds-the-answer-into-the-note ()
+  (claude-pair-test-with-file claude-pair-test--ten
+    (claude-pair-test--two-hunks file)
+    (with-current-buffer (find-buffer-visiting file)
+      (claude-pair-test--goto-hunk 2)
+      (claude-pair-review-ask-hunk "why?"))
+    (claude-pair-test-with-chat
+      (claude-pair-test--feed
+       '(:kind "edit" :state "pending" :requestId "e1" :editKind "edit" :relPath "a.txt")
+       '(:kind "edit" :state "question" :requestId "e1" :message "why?"
+               :hunks [(:index 1 :line 2 :decision "undecided") (:index 2 :line 9 :decision "asked")])
+       '(:kind "text" :delta "Because ")
+       '(:kind "text" :delta "it reads better.")
+       '(:kind "result" :subtype "success"))
+      (should (string-match-p "? You asked about hunk 2 (line 9): why\\?" (claude-pair-test--transcript)))
+      (let ((note (gethash "e1" claude-pair-review--notes)))
+        (should (equal (plist-get note :answer) "Because it reads better."))
+        (should (plist-get note :done)))
+      ;; After the turn, text no longer goes to the note.
+      (claude-pair-test--feed '(:kind "text" :delta " More."))
+      (should (equal (plist-get (gethash "e1" claude-pair-review--notes) :answer) "Because it reads better.")))
+    (with-current-buffer (find-buffer-visiting file)
+      (claude-pair-review-dismiss-note))))
+
 ;;;; The chat block, drawn before the edit is shown
 
 (ert-deftest claude-pair-hunk-a-block-drawn-early-gets-its-keys ()
@@ -302,6 +393,31 @@
         (should (string-match-p "◐ Applied 1 of 2 hunks, saved" text))
         (should (string-match-p "applied 1 of its 2 hunks" text))
         (should (string-match-p "Their note: keep nine" text))))))
+
+(ert-deftest claude-pair-hunk-ask-for-real ()
+  (claude-pair-test-with-edit-project
+    (with-temp-file (expand-file-name "a.txt" project) (insert claude-pair-test--ten))
+    (claude-pair-test--send
+     buffer (claude-pair-test--edit-prompt
+             (list :file "a.txt" :old claude-pair-test--ten
+                   :new (replace-regexp-in-string
+                         "line 9\n" "NINE\n"
+                         (replace-regexp-in-string "line 2\n" "TWO\n" claude-pair-test--ten)))))
+    (let ((id (claude-pair-test--wait-proposal)))
+      (with-current-buffer (find-buffer-visiting (expand-file-name "a.txt" project))
+        (let ((hunks (plist-get (gethash id claude-pair-review--proposals) :hunks)))
+          (goto-char (nth 0 (claude-pair-review--hunk-entry (cadr hunks))))
+          (claude-pair-review-ask-hunk "why NINE?")))
+      (claude-pair-test--wait-idle buffer)
+      (with-current-buffer buffer
+        (let ((text (claude-pair-test--transcript)))
+          (should (string-match-p "? You asked about hunk 2 (line 9): why NINE" text))
+          (should (string-match-p "the user asks you a question about hunk 2" text))))
+      ;; The fake claude's reply (it echoes the tool result) reached the note.
+      (should (string-match-p "the user asks you a question"
+                              (plist-get (gethash id claude-pair-review--notes) :answer)))
+      (with-current-buffer (find-buffer-visiting (expand-file-name "a.txt" project))
+        (claude-pair-review-dismiss-note)))))
 
 (provide 'claude-pair-hunk-tests)
 ;;; claude-pair-hunk-tests.el ends here

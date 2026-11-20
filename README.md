@@ -116,6 +116,7 @@ With point on a hunk:
 |---|---|
 | `C-c C-a` | Apply the hunk (one undo step) and move to the next |
 | `C-c C-k` | Reject it; you can tell Claude why |
+| `C-c '` | Ask Claude about it first (`@claude …`) |
 | `C-u C-c C-a`, `C-u C-c C-k` | The same for every hunk of the edit |
 | `n`, `p` | On the hunk's own text: the next or previous hunk |
 
@@ -127,6 +128,14 @@ in a terminal the hunk's banner line lights up and its "apply" and "reject"
 parts are the buttons. `M-RET` opens it at once; it closes when point
 leaves the hunk. `claude-pair-popup-style` picks `child-frame`, `inline` or
 nil (never).
+
+Asking (`C-c '`, or "@ Ask Claude…" in the popup) sends the edit back to
+Claude with your question. Hunks you already decided keep their decision;
+the rest are not applied, and Claude answers and proposes them again,
+revised if your question calls for it. The answer streams into the chat
+and into a note where the hunk was (`┃ @claude …`), which `[×]` or `M-x
+claude-pair-review-dismiss-note` removes; the note shows the first
+`claude-pair-review-note-lines` lines (6).
 
 Claude hears what happened to every hunk, with your notes, once the last
 one is decided. The chat shows the edit as a block with its number of

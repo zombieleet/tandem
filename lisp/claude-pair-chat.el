@@ -164,6 +164,10 @@ which inherited them from the Emacs that started it."
   "Map from tool call id to milliseconds its question waited for you.")
 (defvar-local claude-pair-chat--refused nil
   "Tools whose question was denied or withdrawn in the current turn.")
+(defvar-local claude-pair-chat--answering nil
+  "Request id of the edit Claude is answering a question about, or nil.
+Claude's text goes into that edit's note as well.")
+
 (defvar-local claude-pair-chat--reviews nil
   "Ids of proposed edits waiting for a decision, oldest first.")
 (defvar-local claude-pair-chat--edit-calls nil
@@ -430,6 +434,8 @@ METHOD is the notification's name."
      (setq claude-pair-chat--model (plist-get update :model)))
     ("text"
      (setq claude-pair-chat--state "writing")
+     (when claude-pair-chat--answering
+       (claude-pair-review-note-append claude-pair-chat--answering (plist-get update :delta)))
      (claude-pair-chat--enqueue (cons 'text (plist-get update :delta))))
     ("tool"
      (cond
@@ -457,6 +463,7 @@ METHOD is the notification's name."
     ("todo"
      (claude-pair-chat--enqueue (cons 'todo (plist-get update :items))))
     ("result"
+     (claude-pair-chat--stop-answering)
      (let ((cost (plist-get update :sessionCostUsd)))
        (when (numberp cost)
          (setq claude-pair-chat--cost cost)))
@@ -466,8 +473,14 @@ METHOD is the notification's name."
       (list 'error (plist-get update :message) (plist-get update :stderr))))
     ("edit"
      (let ((id (plist-get update :requestId)))
+       (when (equal (plist-get update :state) "question")
+         ;; What Claude writes next answers the question.
+         (claude-pair-chat--stop-answering)
+         (setq claude-pair-chat--answering id))
        (if (equal (plist-get update :state) "pending")
            (progn
+             ;; A new proposal ends the answer.
+             (claude-pair-chat--stop-answering)
              (when-let* ((call (seq-find (lambda (c) (not (cdr c))) claude-pair-chat--edit-calls)))
                (setcdr call t))
              (setq claude-pair-chat--reviews (append claude-pair-chat--reviews (list id))
@@ -961,6 +974,29 @@ has neither its keys nor its number of hunks."
 
 (add-hook 'claude-pair-review-show-functions #'claude-pair-chat--refresh-edit)
 
+(defun claude-pair-chat--stop-answering ()
+  "Finish the note Claude was answering into, if any."
+  (when claude-pair-chat--answering
+    (claude-pair-review-note-done claude-pair-chat--answering)
+    (setq claude-pair-chat--answering nil)))
+
+(defun claude-pair-chat--question-text (update)
+  "Describe the question you asked about a hunk of the edit in UPDATE."
+  (let* ((hunks (append (plist-get update :hunks) nil))
+         (asked (seq-find (lambda (h) (equal (plist-get h :decision) "asked")) hunks))
+         (applied (seq-count (lambda (h) (equal (plist-get h :decision) "applied")) hunks)))
+    (concat
+     (propertize (format "    ? You asked about %s: %s"
+                         (if (cdr hunks)
+                             (format "hunk %d (line %d)" (plist-get asked :index) (plist-get asked :line))
+                           "it")
+                         (car (split-string (or (plist-get update :message) "") "\n")))
+                 'face 'claude-pair-chat-ask)
+     (if (> applied 0)
+         (propertize (format "\n      %d of %d hunks applied first" applied (length hunks))
+                     'face 'claude-pair-chat-meta)
+       ""))))
+
 (defun claude-pair-chat--partial-text (update)
   "Describe the hunk by hunk outcome in UPDATE, one line per hunk not applied."
   (let* ((hunks (append (plist-get update :hunks) nil))
@@ -1000,6 +1036,8 @@ has neither its keys nor its number of hunks."
                     'face 'claude-pair-chat-tool-error))
        ("partial"
         (claude-pair-chat--partial-text update))
+       ("question"
+        (claude-pair-chat--question-text update))
        ("error"
         (propertize (format "    ✗ Not applied: %s" (car (split-string message "\n")))
                     'face 'claude-pair-chat-tool-error))

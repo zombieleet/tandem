@@ -156,6 +156,7 @@
       (should (string-match-p "Claude · hunk 2 of 2 · a.txt" text))
       (should (string-match-p "✓ Approve C-c C-a" text))
       (should (string-match-p "✗ Reject… C-c C-k" text))
+      (should (string-match-p "@ Ask Claude… C-c '" text))
       (let ((at (string-search "✓ Approve" text)))
         (should (eq (get-text-property at 'keymap text) claude-pair-review-apply-button-map))))))
 

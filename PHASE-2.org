@@ -100,15 +100,32 @@ check, and a milestone is committed before the next one starts.
 - [X] Keep typing in the file while a popup is open: typing is never
   interrupted
 
-* TODO M3 · Ask Claude about a hunk [0/4]
-- [ ] "Ask Claude…" (=C-c C-'=) takes a question, with =@claude=
-- [ ] The edit returns to Claude as a question about that hunk; Claude
-  answers in the chat and may propose a revised hunk
-- [ ] The answer also shows as a note on the hunk, like a review comment
-- [ ] Other hunks of the edit keep their decisions
-** Visual gate
-- [ ] Ask "why not use a list comprehension?" on a hunk: answer and a
-  revised hunk appear
+* DONE M3 · Ask Claude about a hunk [4/4]
+- [X] "@ Ask Claude…" in the popup, or =C-c '= on a hunk (=C-c C-'= too in a
+  GUI), asks "@claude (about hunk 2): " in the minibuffer
+- [X] The edit returns to Claude as a question about that hunk (outcome
+  =question=, protocol 0.8.0): Claude is asked to answer, then propose
+  what is still wanted again, revised if the question calls for it
+- [X] The answer streams into a note where the hunk was, like a review
+  comment (=┃ @claude …=, first 6 lines, =[×]= or
+  =claude-pair-review-dismiss-note= removes it); the whole answer is in
+  the chat
+- [X] Hunks already decided keep their decisions; undecided ones are not
+  applied, and Claude is told which
+** Auto
+- [X] ERT: asking, the note and its streaming answer, long answers, the
+  chat feeding the note until the turn ends, the popup's third button,
+  and asking for real through the daemon (6 tests); Go: the wording
+  Claude reads; =make check= clean (143 ERT tests)
+** Interactive check run by Claude (GUI Emacs in headless cage, fake claude)
+- [X] The popup shows three buttons; clicking "@ Ask Claude…" sent the
+  question, both hunks went, and a note with the question and the reply
+  sits where hunk 2 was; the chat shows "? You asked about hunk 2"
+** Visual gate (passed 20 Nov 2026)
+- [X] Ask "why not use a list comprehension?" (or any question) on a
+  hunk: Claude answers in the chat and in the note, and proposes a
+  revised hunk
+- [X] Dismiss the note with [×]
 
 * TODO M4 · Claude's lines keep their colour [0/6]
 - [ ] Applied Claude text gets the =claude-pair-author= property: session,
@@ -147,3 +164,15 @@ check, and a milestone is committed before the next one starts.
 - [ ] README and protocol document
 - [ ] =make check= clean
 - [ ] Your sign-off: daily use with the popup and colours
+
+* Noted for phase 3 (your ideas, 20 Nov 2026)
+- [ ] Ask about any selection: select code anywhere, =@claude explain
+  this= / =do this=; it goes to the chat with the file, lines and code,
+  and the answer also shows as a note above the selection
+- [ ] Project root without git: look upwards for =CLAUDE.md=,
+  =AGENTS.md=, =.claude/= or common project files (=package.json=,
+  =go.mod=, …), stopping before your home folder; if none, ask, with the
+  file's folder as the default; never =~= or =/= without asking
+  (=claude-pair-project-markers=)
+- [ ] Optionally, in a repo, offer a subdirectory that has its own
+  =CLAUDE.md= as the root (monorepos); git root stays the default

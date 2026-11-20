@@ -27,7 +27,7 @@
 ;; over one, a small popup opens next to it:
 ;;
 ;;   Claude · hunk 2 of 3 · geo.py
-;;   [✓ Approve]  C-c C-a    [✗ Reject…]  C-c C-k
+;;   [✓ Approve] C-c C-a   [✗ Reject…] C-c C-k   [@ Ask Claude…] C-c '
 ;;
 ;; In a graphical frame it is a child frame below the hunk (above it when
 ;; there is no room below) that never takes focus, so you keep typing where
@@ -110,10 +110,13 @@ line elsewhere; `inline' always uses the banner line."
                             'face 'claude-pair-popup-button))
          (reject (propertize (claude-pair-review-button "✗ Reject…" claude-pair-review-reject-button-map hunk)
                              'face 'claude-pair-popup-button))
+         (ask (propertize (claude-pair-review-button "@ Ask Claude…" claude-pair-review-ask-button-map hunk)
+                          'face 'claude-pair-popup-button))
          (keys (lambda (k) (propertize k 'face '(shadow claude-pair-popup)))))
     (concat (propertize (concat " " title " ") 'face 'claude-pair-popup-title) "\n"
             " " apply " " (funcall keys "C-c C-a") "   "
-            reject " " (funcall keys "C-c C-k") " ")))
+            reject " " (funcall keys "C-c C-k") "   "
+            ask " " (funcall keys "C-c '") " ")))
 
 ;;;; The child frame
 

@@ -246,3 +246,28 @@ func TestPartialEditTellsClaudeEachHunk(t *testing.T) {
 		t.Fatalf("followers get the hunks: %v", partial)
 	}
 }
+
+func TestQuestionAboutAHunk(t *testing.T) {
+	d := startDaemon(t, 0, "cpd-")
+	c := ready(t, d)
+	id := createSessionIn(t, c, project(t))
+	prompt(t, c, id, editPrompt(t, map[string]any{"file": "a.txt", "old": "x", "new": "y"}))
+	p := c.nextNotification("edit/propose")
+	hunks := []map[string]any{
+		{"index": 1, "line": 3, "oldLines": 1, "newLines": 1, "decision": "applied", "saved": true},
+		{"index": 2, "line": 9, "oldLines": 1, "newLines": 2, "decision": "asked", "note": "why not a list comprehension?"},
+		{"index": 3, "line": 20, "oldLines": 2, "newLines": 2, "decision": "undecided"},
+	}
+	wantCode(t, answerEdit(c, p["requestId"].(string), map[string]any{"outcome": "question", "hunks": hunks}),
+		protocol.InvalidParams)
+	wantOK(t, answerEdit(c, p["requestId"].(string), map[string]any{
+		"outcome": "question", "message": "why not a list comprehension?", "hunks": hunks}))
+	want := "edit result: Before deciding, the user asks you a question about hunk 2 of your edit to a.txt " +
+		"(1 line at line 9, becoming 2 lines):\n\nwhy not a list comprehension?\n\n" +
+		"Answer the question in your reply. Already applied: hunk 1. Not applied, because the user has not " +
+		"decided on them: hunk 2, hunk 3. If you still want what was not applied, propose it again after " +
+		"answering, revised if the question calls for it, with a new edit based on the file as it is now."
+	if got := turnText(c.untilIdle(id)); got != want {
+		t.Fatalf("text:\n%s\nwant:\n%s", got, want)
+	}
+}

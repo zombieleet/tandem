@@ -36,6 +36,8 @@
 ;;
 ;;   C-c C-a   apply the hunk (one undo step)
 ;;   C-c C-k   reject it, optionally telling Claude why
+;;   C-c '     ask Claude about it first (@claude …); its answer shows
+;;             as a note where the hunk was
 ;;   C-u       before either: the same for every hunk of the edit
 ;;   n, p      on the hunk's text: the next or previous hunk
 ;;
@@ -116,7 +118,9 @@ A proposal has :id, :buffer, :path, :kind, :session, :new-file and
 (defvar-keymap claude-pair-review-hunk-map
   :doc "Keys on the lines of a proposed hunk."
   "C-c C-a" #'claude-pair-review-apply-hunk
-  "C-c C-k" #'claude-pair-review-reject-hunk)
+  "C-c C-k" #'claude-pair-review-reject-hunk
+  "C-c '" #'claude-pair-review-ask-hunk
+  "C-c C-'" #'claude-pair-review-ask-hunk)
 
 (defvar-keymap claude-pair-review-apply-button-map
   :doc "Mouse keys on an \"apply\" button."
@@ -130,6 +134,32 @@ A proposal has :id, :buffer, :path, :kind, :session, :new-file and
   "<down-mouse-1>" #'ignore
   "<mouse-1>" #'claude-pair-review-click-reject
   "<drag-mouse-1>" #'claude-pair-review-click-reject)
+
+(defvar-keymap claude-pair-review-ask-button-map
+  :doc "Mouse keys on an \"ask Claude\" button."
+  "<down-mouse-1>" #'ignore
+  "<mouse-1>" #'claude-pair-review-click-ask
+  "<drag-mouse-1>" #'claude-pair-review-click-ask)
+
+(defvar-keymap claude-pair-review-note-button-map
+  :doc "Mouse keys on a note's close button."
+  "<down-mouse-1>" #'ignore
+  "<mouse-1>" #'claude-pair-review-click-dismiss
+  "<drag-mouse-1>" #'claude-pair-review-click-dismiss)
+
+(defface claude-pair-review-note
+  '((t :inherit font-lock-doc-face :extend t))
+  "Face for a question you asked Claude about a hunk, and its answer."
+  :group 'claude-pair)
+
+(defcustom claude-pair-review-note-lines 6
+  "Lines of Claude's answer a note shows; the chat has all of it."
+  :type 'natnum
+  :group 'claude-pair)
+
+(defvar claude-pair-review--notes (make-hash-table :test #'equal)
+  "Map from edit request id to the note of the question asked about it.
+A note is a plist: :overlay, :question and :answer.")
 
 (defvar-keymap claude-pair-review-hunk-text-map
   :doc "Keys on a hunk's own text, which you cannot type into anyway."
@@ -799,6 +829,13 @@ With NO-SAVE, leave saving to the caller.  Return non-nil if applied."
                                     hunks))))
       (mapc #'claude-pair-review--free hunks)
       (cond
+       ((memq 'asked states)
+        (let ((question (claude-pair-review--hunk-note
+                         (seq-find (lambda (h) (eq (claude-pair-review--hunk-state h) 'asked)) hunks))))
+          (claude-pair-review--answer id "question" :message question :saved saved
+                                      :hunks (mapcar #'claude-pair-review--hunk-report hunks))
+          (message "claude-pair: asked Claude about %s; its answer comes in the chat and in a note"
+                   name)))
        ((seq-every-p (lambda (s) (eq s 'applied)) states)
         (claude-pair-review--answer id "applied" :saved saved
                                     :created (and saved (plist-get proposal :new-file)))
@@ -912,6 +949,120 @@ With prefix argument ALL, apply every waiting hunk of its edit."
         (reason (or reason (read-string "Tell Claude why you reject this hunk (optional): "))))
     (claude-pair-review--settle hunk 'rejected reason)
     (claude-pair-review--after-decision proposal)))
+
+(defun claude-pair-review-ask-hunk (&optional question)
+  "Ask Claude QUESTION about the hunk at point before deciding on it.
+The edit goes back to Claude with your question: hunks you decided keep
+their decisions, the others are not applied, and Claude answers and may
+propose them again.  Its answer shows as a note where the hunk was."
+  (interactive)
+  (claude-pair-review-ask-this-hunk
+   (or (claude-pair-review--hunk-at-point)
+       (user-error "Point is not on a hunk Claude proposed"))
+   question))
+
+(defun claude-pair-review-ask-this-hunk (hunk &optional question)
+  "Ask Claude QUESTION about HUNK; see `claude-pair-review-ask-hunk'."
+  (let* ((proposal (claude-pair-review--proposal (claude-pair-review--hunk-id hunk)))
+         (question (string-trim
+                    (or question
+                        (read-string (format "@claude (about hunk %d): "
+                                             (claude-pair-review--hunk-index hunk))
+                                     nil nil nil t)))))
+    (when (string-empty-p question)
+      (user-error "Type a question for Claude"))
+    (claude-pair-review--make-note hunk question)
+    (claude-pair-review--settle hunk 'asked question)
+    (dolist (other (claude-pair-review--pending proposal))
+      (claude-pair-review--settle other 'undecided))
+    (claude-pair-review--maybe-finish proposal)))
+
+(defun claude-pair-review-click-ask (event)
+  "Ask Claude about the hunk whose button EVENT clicked."
+  (interactive "e")
+  (claude-pair-review-ask-this-hunk (claude-pair-review--clicked-hunk event)))
+
+;;;; Notes: a question about a hunk, and Claude's answer
+
+(defun claude-pair-review--note-text (id)
+  "Return the lines of the note for edit ID."
+  (let* ((note (gethash id claude-pair-review--notes))
+         (bar (propertize "┃ " 'face 'claude-pair-review-note))
+         (answer (string-trim (or (plist-get note :answer) "")))
+         (lines (if (string-empty-p answer) nil (split-string answer "\n")))
+         (shown (seq-take lines claude-pair-review-note-lines))
+         (close (propertize "[×]" 'keymap claude-pair-review-note-button-map
+                            'mouse-face 'highlight 'claude-pair-note id
+                            'help-echo "mouse-1: dismiss this note")))
+    (concat
+     bar (propertize (concat "@claude " (plist-get note :question)) 'face '(bold claude-pair-review-note))
+     "  " close "\n"
+     (if (null lines)
+         (concat bar (propertize (if (plist-get note :done) "Claude: (no answer)" "Claude: …")
+                                 'face 'claude-pair-review-note)
+                 "\n")
+       (concat
+        (mapconcat (lambda (line)
+                     (concat bar (propertize line 'face 'claude-pair-review-note) "\n"))
+                   (cons (concat "Claude: " (car shown)) (cdr shown))
+                   "")
+        (when (> (length lines) claude-pair-review-note-lines)
+          (concat bar (propertize "… the rest is in the chat" 'face '(italic claude-pair-review-note))
+                  "\n")))))))
+
+(defun claude-pair-review--make-note (hunk question)
+  "Put a note for QUESTION at the start of HUNK."
+  (let* ((id (claude-pair-review--hunk-id hunk))
+         (beg (claude-pair-review--hunk-beg hunk))
+         (old (gethash id claude-pair-review--notes)))
+    (when old (delete-overlay (plist-get old :overlay)))
+    (with-current-buffer (marker-buffer beg)
+      (let* ((bol (save-excursion (goto-char beg) (line-beginning-position)))
+             (overlay (make-overlay bol bol nil t nil)))
+        ;; Above the banner of whatever Claude proposes there next.
+        (overlay-put overlay 'priority 10)
+        (overlay-put overlay 'claude-pair-note id)
+        (puthash id (list :overlay overlay :question question :answer "") claude-pair-review--notes)
+        (overlay-put overlay 'before-string (claude-pair-review--note-text id))))))
+
+(defun claude-pair-review-note-append (id text)
+  "Add TEXT, more of Claude's answer, to the note for edit ID."
+  (when-let* ((note (gethash id claude-pair-review--notes)))
+    (plist-put note :answer (concat (plist-get note :answer) text))
+    (claude-pair-review--redraw-note id)))
+
+(defun claude-pair-review-note-done (id)
+  "Mark the answer in the note for edit ID as complete."
+  (when-let* ((note (gethash id claude-pair-review--notes)))
+    (plist-put note :done t)
+    (claude-pair-review--redraw-note id)))
+
+(defun claude-pair-review--redraw-note (id)
+  "Draw the note for edit ID again."
+  (let ((overlay (plist-get (gethash id claude-pair-review--notes) :overlay)))
+    (when (overlay-buffer overlay)
+      (overlay-put overlay 'before-string (claude-pair-review--note-text id)))))
+
+(defun claude-pair-review-dismiss-note (&optional id)
+  "Remove the note for edit ID, or every note in this buffer."
+  (interactive)
+  (let (ids)
+    (maphash (lambda (key note)
+               (when (or (equal key id)
+                         (and (null id)
+                              (eq (overlay-buffer (plist-get note :overlay)) (current-buffer))))
+                 (push key ids)))
+             claude-pair-review--notes)
+    (dolist (key ids)
+      (delete-overlay (plist-get (gethash key claude-pair-review--notes) :overlay))
+      (remhash key claude-pair-review--notes))))
+
+(defun claude-pair-review-click-dismiss (event)
+  "Remove the note whose close button EVENT clicked."
+  (interactive "e")
+  (let ((string (posn-string (event-start event))))
+    (when-let* ((id (and string (get-text-property (cdr string) 'claude-pair-note (car string)))))
+      (claude-pair-review-dismiss-note id))))
 
 (defun claude-pair-review--clicked-hunk (event)
   "Return the pending hunk whose button EVENT clicked, and select its window.

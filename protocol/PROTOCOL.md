@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.7.0**. This document is the contract between the Emacs client
+Version **0.8.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -238,12 +238,16 @@ review itself is the question, and no permission rule can skip it.
    `editKind`, `filePath`, `relPath`, `title`.
 4. The client checks the edit against the file's live buffer, shows it, and
    answers with `edit/answer` `{requestId, outcome: "applied" | "rejected" |
-   "partial" | "error", message, saved, created, hunks}`. A client may
+   "partial" | "question" | "error", message, saved, created, hunks}`. A client may
    split an edit into hunks for the user to decide one by one; `hunks` then
    lists each one as `{index, line, oldLines, newLines, decision:
-   "applied" | "rejected" | "error", note, saved}`, where `line` is where
-   the hunk started when proposed. `partial` means some hunks were applied
-   and some not, and requires `hunks`. Only the client the edit was proposed
+   "applied" | "rejected" | "error" | "asked" | "undecided", note, saved}`,
+   where `line` is where the hunk started when proposed. `partial` means
+   some hunks were applied and some not, and requires `hunks`. `question`
+   means the user asked about one hunk (`asked`, its note the question)
+   before deciding the rest (`undecided`, not applied); it requires
+   `hunks` and the question as `message`, and Claude reads it as a normal
+   result asking it to answer and propose what is still wanted again. Only the client the edit was proposed
    to may answer; others get `-32006`. The client's error messages follow the
    built-in Edit tool's: `String to replace not found in file.`, `Found N
    matches of the string to replace, but replace_all is false. …`.
