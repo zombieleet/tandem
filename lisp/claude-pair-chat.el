@@ -28,7 +28,14 @@
 ;;
 ;;   C-c C-c   send the composer to Claude
 ;;   C-c C-k   stop Claude's current answer
+;;   C-c C-p   answer Claude's oldest permission question
 ;;   M-p, M-n  step through earlier messages
+;;
+;; When Claude wants to run a command or use a tool that needs approval, the
+;; request appears in the transcript.  With point on it, press y to allow
+;; it once, a to always allow it in this project, n to deny it, or d to deny
+;; it and tell Claude why.  Nothing is asked in the minibuffer behind your
+;; back, so a stray keystroke elsewhere can never approve a command.
 ;;
 ;; Updates from the daemon are queued and drawn every
 ;; `claude-pair-chat-flush-interval' seconds, so long answers do not make
@@ -40,6 +47,7 @@
 (require 'claude-pair-rpc)
 (require 'project)
 (require 'ring)
+(require 'sh-script)
 (require 'subr-x)
 
 (defcustom claude-pair-claude-command nil
@@ -95,6 +103,14 @@
   "Face for the prompt before the composer."
   :group 'claude-pair)
 
+(defface claude-pair-chat-ask '((t :inherit warning :weight bold))
+  "Face for a permission question from Claude."
+  :group 'claude-pair)
+
+(defface claude-pair-chat-keys '((t :inherit help-key-binding))
+  "Face for the keys that answer a permission question."
+  :group 'claude-pair)
+
 (defconst claude-pair-chat--prompt "\n❯ "
   "Text between the transcript and the composer.")
 
@@ -117,10 +133,29 @@
 (defvar-local claude-pair-chat--after-tool nil "Non-nil when the transcript ends with a tool line.")
 (defvar-local claude-pair-chat--history nil "Ring of sent messages.")
 (defvar-local claude-pair-chat--history-index nil "Position in the history ring, or nil.")
+(defvar-local claude-pair-chat--permissions nil
+  "Map from permission request id to a plist describing its block.")
+(defvar-local claude-pair-chat--pending nil
+  "Ids of unanswered permission requests, oldest first.")
+(defvar-local claude-pair-chat--asked-at nil
+  "Map from tool call id to when its permission question arrived.")
+(defvar-local claude-pair-chat--waited nil
+  "Map from tool call id to milliseconds its question waited for you.")
+(defvar-local claude-pair-chat--refused nil
+  "Tools whose question was denied or withdrawn in the current turn.")
+
+(defvar-keymap claude-pair-chat-permission-map
+  :doc "Keys on a permission request in the chat transcript."
+  "y" #'claude-pair-chat-allow
+  "a" #'claude-pair-chat-allow-always
+  "n" #'claude-pair-chat-deny
+  "d" #'claude-pair-chat-deny-with-reason
+  "RET" #'claude-pair-chat-answer-permission)
 
 (defvar-keymap claude-pair-chat-mode-map
   "C-c C-c" #'claude-pair-chat-send
   "C-c C-k" #'claude-pair-chat-cancel
+  "C-c C-p" #'claude-pair-chat-answer-permission
   "M-p" #'claude-pair-chat-previous-input
   "M-n" #'claude-pair-chat-next-input)
 
@@ -206,6 +241,9 @@ always start a new session."
   (setq claude-pair-chat--session-id session-id
         claude-pair-chat--root root
         claude-pair-chat--tools (make-hash-table :test #'equal)
+        claude-pair-chat--permissions (make-hash-table :test #'equal)
+        claude-pair-chat--asked-at (make-hash-table :test #'equal)
+        claude-pair-chat--waited (make-hash-table :test #'equal)
         claude-pair-chat--history (make-ring claude-pair-chat-history-size))
   (let ((inhibit-read-only t)
         (buffer-undo-list t))
@@ -351,9 +389,15 @@ METHOD is the notification's name."
            (claude-pair-chat--enqueue
             (list 'tool-start (plist-get update :id) (plist-get update :title))))
        (setq claude-pair-chat--state "running")
-       (claude-pair-chat--enqueue
-        (list 'tool-end (plist-get update :id) (plist-get update :status)
-              (plist-get update :durationMs)))))
+       (let* ((id (plist-get update :id))
+              (duration (plist-get update :durationMs))
+              (waited (gethash id claude-pair-chat--waited)))
+         ;; Time spent waiting for your answer is not the tool's own time.
+         (when (and (numberp duration) waited)
+           (setq duration (max 0 (- duration waited)))
+           (remhash id claude-pair-chat--waited))
+         (claude-pair-chat--enqueue
+          (list 'tool-end id (plist-get update :status) duration)))))
     ("todo"
      (claude-pair-chat--enqueue (cons 'todo (plist-get update :items))))
     ("result"
@@ -363,8 +407,48 @@ METHOD is the notification's name."
      (claude-pair-chat--enqueue (cons 'result update)))
     ("error"
      (claude-pair-chat--enqueue
-      (list 'error (plist-get update :message) (plist-get update :stderr)))))
+      (list 'error (plist-get update :message) (plist-get update :stderr))))
+    ("permission"
+     (let ((id (plist-get update :requestId))
+           (tool-use (plist-get update :toolUseId)))
+       (if (equal (plist-get update :state) "pending")
+           (progn
+             (setq claude-pair-chat--pending (append claude-pair-chat--pending (list id))
+                   claude-pair-chat--state "waiting")
+             (when tool-use
+               (puthash tool-use (float-time) claude-pair-chat--asked-at))
+             (puthash id update claude-pair-chat--asked-at)
+             (claude-pair-chat--enqueue (cons 'permission update))
+             (claude-pair-chat--alert update))
+         (let* ((asked (gethash id claude-pair-chat--asked-at))
+                (tool-use (plist-get asked :toolUseId))
+                (since (and tool-use (gethash tool-use claude-pair-chat--asked-at))))
+           (when (numberp since)
+             (puthash tool-use (round (* 1000 (- (float-time) since))) claude-pair-chat--waited)
+             (remhash tool-use claude-pair-chat--asked-at))
+           (remhash id claude-pair-chat--asked-at)
+           (unless (and (equal (plist-get update :state) "answered")
+                        (equal (plist-get update :decision) "allow"))
+             (push (plist-get asked :toolName) claude-pair-chat--refused)))
+         (setq claude-pair-chat--pending (delete id claude-pair-chat--pending))
+         (when (and (null claude-pair-chat--pending)
+                    (equal claude-pair-chat--state "waiting"))
+           (setq claude-pair-chat--state "running"))
+         (claude-pair-chat--enqueue (cons 'permission-done update))))))
   (force-mode-line-update))
+
+(defun claude-pair-chat--alert (update)
+  "Make sure the user notices the permission question in UPDATE."
+  (let ((buffer (current-buffer)))
+    (unless (get-buffer-window buffer 'visible)
+      (display-buffer buffer
+                      `((display-buffer-in-side-window)
+                        (side . right) (slot . 0)
+                        (window-width . ,claude-pair-chat-window-width)
+                        (inhibit-switch-frame . t))))
+    (message "claude-pair: Claude wants to %s %s.  In the chat, y allows, a always allows, n denies."
+             (claude-pair-chat--verb (plist-get update :toolName))
+             (claude-pair-chat--subject update))))
 
 (defun claude-pair-chat--on-disconnect ()
   "Tell every chat buffer that the daemon connection closed."
@@ -427,7 +511,9 @@ METHOD is the notification's name."
           ('todo (claude-pair-chat--draw-todo (cdr item)))
           ('result (claude-pair-chat--draw-result (cdr item)))
           ('error (apply #'claude-pair-chat--draw-error (cdr item)))
-          ('notice (claude-pair-chat--draw-notice (cdr item))))))))
+          ('notice (claude-pair-chat--draw-notice (cdr item)))
+          ('permission (claude-pair-chat--draw-permission (cdr item)))
+          ('permission-done (claude-pair-chat--draw-permission-done (cdr item))))))))
 
 (defun claude-pair-chat--shift-undo (pos delta)
   "Move positions at or after POS in `buffer-undo-list' by DELTA.
@@ -468,8 +554,18 @@ recorded before a change have to move with the text."
      (claude-pair-chat--shift-undo before (- (marker-position claude-pair-chat--input) before))))
 
 (defun claude-pair-chat--read-only (string)
-  "Return STRING marked read-only, so text cannot be typed into or beside it."
-  (propertize string 'read-only t 'front-sticky '(read-only)))
+  "Return STRING marked read-only, so text cannot be typed into or beside it.
+Faces are copied to `font-lock-face' as well, so modes that refontify
+the buffer do not strip them."
+  (let ((s (propertize string 'read-only t 'front-sticky '(read-only)))
+        (pos 0))
+    (while (< pos (length s))
+      (let ((next (next-single-property-change pos 'face s (length s)))
+            (face (get-text-property pos 'face s)))
+        (when face
+          (put-text-property pos next 'font-lock-face face s))
+        (setq pos next)))
+    s))
 
 (defun claude-pair-chat--insert (&rest strings)
   "Add STRINGS, read-only, at the end of the transcript."
@@ -564,7 +660,9 @@ recorded before a change have to move with the text."
   "Close Claude's answer with a line about RESULT."
   (let ((cancelled (eq (plist-get result :cancelled) t))
         (failed (eq (plist-get result :isError) t))
-        (denied (append (plist-get result :permissionDenials) nil)))
+        ;; Denials you made yourself already show on their question.
+        (denied (seq-remove (lambda (tool) (member tool claude-pair-chat--refused))
+                            (delete-dups (append (plist-get result :permissionDenials) nil)))))
     (claude-pair-chat--fresh-line)
     (cond
      (cancelled
@@ -584,12 +682,13 @@ recorded before a change have to move with the text."
        "\n")))
     (when denied
       (claude-pair-chat--insert
-       (propertize (format "  Not allowed yet: %s.  Tools that need your approval are \
-denied until permission prompts arrive.\n"
+       (propertize (format "  Not allowed: %s.  Claude Code denied it without asking you, \
+because of a deny rule or because no Emacs could answer.\n"
                            (string-join denied ", "))
                    'face 'claude-pair-chat-meta)))
     (setq claude-pair-chat--replying nil
-          claude-pair-chat--after-tool nil)))
+          claude-pair-chat--after-tool nil
+          claude-pair-chat--refused nil)))
 
 (defun claude-pair-chat--draw-error (message stderr)
   "Add an error line with MESSAGE and the end of STDERR."
@@ -608,6 +707,210 @@ denied until permission prompts arrive.\n"
   (claude-pair-chat--fresh-line)
   (claude-pair-chat--insert (propertize (concat "  " text) 'face 'claude-pair-chat-meta) "\n"))
 
+(defun claude-pair-chat--verb (tool)
+  "Return what Claude wants to do with TOOL, as a verb phrase."
+  (pcase tool
+    ("Bash" "run")
+    ("WebFetch" "fetch")
+    ("WebSearch" "search the web for")
+    (_ (format "use %s" tool))))
+
+(defun claude-pair-chat--subject (update)
+  "Return a short description of what permission UPDATE is about."
+  (let ((input (plist-get update :input)))
+    (pcase (plist-get update :toolName)
+      ("Bash" (format "`%s'" (truncate-string-to-width
+                             (car (split-string (or (plist-get input :command) "") "\n"))
+                             60 nil nil "…")))
+      ("WebFetch" (or (plist-get input :url) ""))
+      ("WebSearch" (format "\"%s\"" (or (plist-get input :query) "")))
+      (_ (or (plist-get update :title) "")))))
+
+(defun claude-pair-chat--fontify-shell (code)
+  "Return CODE fontified as a shell command."
+  (with-temp-buffer
+    (insert code)
+    ;; sh-mode announces its shell setup; that would hide the question's
+    ;; echo-area message.
+    (let ((inhibit-message t)
+          (message-log-max nil))
+      (delay-mode-hooks (sh-mode))
+      (font-lock-ensure))
+    (buffer-string)))
+
+(defun claude-pair-chat--indent (text prefix)
+  "Return TEXT with PREFIX before every line, each ending in a newline."
+  (mapconcat (lambda (line) (concat prefix line "\n"))
+             (split-string (string-trim-right text "\n") "\n")
+             ""))
+
+(defun claude-pair-chat--permission-detail (tool input)
+  "Return the lines that show TOOL's INPUT in a permission request."
+  (pcase tool
+    ("Bash"
+     (concat (claude-pair-chat--indent
+              (claude-pair-chat--fontify-shell (or (plist-get input :command) ""))
+              "      ")
+             (when-let* ((description (plist-get input :description)))
+               (propertize (format "      (%s)\n" description) 'face 'claude-pair-chat-meta))))
+    ("WebFetch" (format "      %s\n" (or (plist-get input :url) "")))
+    ("WebSearch" (format "      %s\n" (or (plist-get input :query) "")))
+    (_
+     (let ((lines nil) (plist input))
+       (while (and plist (< (length lines) 6))
+         (push (format "      %s: %s\n"
+                       (substring (symbol-name (car plist)) 1)
+                       (truncate-string-to-width (format "%s" (cadr plist)) 200 nil nil "…"))
+               lines)
+         (setq plist (cddr plist)))
+       (apply #'concat (nreverse lines))))))
+
+(defun claude-pair-chat--key (key)
+  "Return KEY in the face for answer keys."
+  (propertize key 'face 'claude-pair-chat-keys))
+
+(defun claude-pair-chat--draw-permission (update)
+  "Add the permission question in UPDATE to the transcript."
+  (claude-pair-chat--ensure-reply)
+  (claude-pair-chat--fresh-line)
+  (let* ((id (plist-get update :requestId))
+         (tool (plist-get update :toolName))
+         (start (copy-marker claude-pair-chat--output)))
+    (claude-pair-chat--insert
+     (propertize (format "  ⏸ Claude wants to %s:\n" (claude-pair-chat--verb tool))
+                 'face 'claude-pair-chat-ask)
+     (claude-pair-chat--permission-detail tool (plist-get update :input)))
+    (let ((hint-start (copy-marker claude-pair-chat--output)))
+      (claude-pair-chat--insert
+       "    " (claude-pair-chat--key "y") " allow once   "
+       (claude-pair-chat--key "a") " always allow "
+       (propertize (or (plist-get update :alwaysRule) tool) 'face 'claude-pair-chat-meta)
+       "   " (claude-pair-chat--key "n") " deny   "
+       (claude-pair-chat--key "d") " deny with a reason\n")
+      (let ((end (copy-marker claude-pair-chat--output)))
+        (claude-pair-chat--editing-transcript
+          (add-text-properties start end
+                               (list 'keymap claude-pair-chat-permission-map
+                                     'claude-pair-request id)))
+        (puthash id (list :start start :hint-start hint-start :end end
+                          :rule (or (plist-get update :alwaysRule) tool))
+                 claude-pair-chat--permissions)))))
+
+(defun claude-pair-chat--draw-permission-done (update)
+  "Replace the keys of the question UPDATE answers or withdraws with the outcome."
+  (let* ((id (plist-get update :requestId))
+         (entry (gethash id claude-pair-chat--permissions)))
+    (when entry
+      (remhash id claude-pair-chat--permissions)
+      (let* ((allowed (equal (plist-get update :decision) "allow"))
+             (message (plist-get update :message))
+             (outcome
+              (if (equal (plist-get update :state) "withdrawn")
+                  (propertize (format "    Withdrawn: %s" (plist-get update :reason))
+                              'face 'claude-pair-chat-meta)
+                (cond
+                 ((and allowed (eq (plist-get update :always) t))
+                  (propertize (format "    ✓ Always allowed: %s" (plist-get entry :rule))
+                              'face 'claude-pair-chat-tool))
+                 (allowed (propertize "    ✓ Allowed" 'face 'claude-pair-chat-tool))
+                 (t (propertize (if (and (stringp message) (not (string-empty-p message)))
+                                    (format "    ✗ Denied: %s" message)
+                                  "    ✗ Denied")
+                                'face 'claude-pair-chat-tool-error))))))
+        (claude-pair-chat--editing-transcript
+          (let ((hint-start (plist-get entry :hint-start))
+                (end (plist-get entry :end)))
+            (delete-region hint-start (1- end))
+            (goto-char hint-start)
+            (insert (claude-pair-chat--read-only outcome))
+            (remove-list-of-text-properties (plist-get entry :start) end
+                                            '(keymap claude-pair-request))))
+        (dolist (key '(:start :hint-start :end))
+          (set-marker (plist-get entry key) nil))))))
+
+;;;; Answering permission questions
+
+(defun claude-pair-chat--request-at-point ()
+  "Return the request on the line at point, else the oldest pending one."
+  (or (get-text-property (point) 'claude-pair-request)
+      (car claude-pair-chat--pending)
+      (user-error "No permission question is waiting")))
+
+(defun claude-pair-chat--answer (id decision &optional always message)
+  "Answer permission request ID with DECISION, \"allow\" or \"deny\".
+ALWAYS adds a rule; MESSAGE tells Claude why it was denied."
+  (condition-case err
+      (claude-pair-rpc-request 'permission/answer
+                               (list :requestId id :decision decision
+                                     :always (if always t :json-false)
+                                     :message (or message "")))
+    (jsonrpc-error
+     (message "claude-pair: %s" (claude-pair-rpc-error-message err)))))
+
+(defun claude-pair-chat-allow ()
+  "Allow the permission request at point, once."
+  (interactive)
+  (claude-pair-chat--check-buffer)
+  (claude-pair-chat--answer (claude-pair-chat--request-at-point) "allow"))
+
+(defun claude-pair-chat-allow-always ()
+  "Allow the permission request at point, and keep allowing it in this project.
+Claude Code saves the rule in the project's .claude/settings.local.json."
+  (interactive)
+  (claude-pair-chat--check-buffer)
+  (claude-pair-chat--answer (claude-pair-chat--request-at-point) "allow" t))
+
+(defun claude-pair-chat-deny ()
+  "Deny the permission request at point."
+  (interactive)
+  (claude-pair-chat--check-buffer)
+  (claude-pair-chat--answer (claude-pair-chat--request-at-point) "deny"))
+
+(defun claude-pair-chat-deny-with-reason ()
+  "Deny the permission request at point and tell Claude why."
+  (interactive)
+  (claude-pair-chat--check-buffer)
+  (let ((id (claude-pair-chat--request-at-point)))
+    (claude-pair-chat--answer id "deny" nil
+                              (read-string "Tell Claude why, or what to do instead: "))))
+
+(defun claude-pair-chat-answer-permission ()
+  "Answer the permission request at point, or the oldest one, from a menu."
+  (interactive)
+  (claude-pair-chat--check-buffer)
+  (let* ((id (claude-pair-chat--request-at-point))
+         (rule (plist-get (gethash id claude-pair-chat--permissions) :rule))
+         (choice (read-multiple-choice
+                  "Claude is waiting for your answer"
+                  `((?y "allow once")
+                    (?a "always allow" ,(format "Allow now and in future: %s" rule))
+                    (?n "deny")
+                    (?d "deny with a reason")))))
+    (pcase (car choice)
+      (?y (claude-pair-chat--answer id "allow"))
+      (?a (claude-pair-chat--answer id "allow" t))
+      (?n (claude-pair-chat--answer id "deny"))
+      (?d (claude-pair-chat--answer
+           id "deny" nil (read-string "Tell Claude why, or what to do instead: "))))))
+
+;;;###autoload
+(defun claude-pair-answer-permission ()
+  "Answer Claude's waiting permission question from any buffer."
+  (interactive)
+  (let ((buffer (if (and (derived-mode-p 'claude-pair-chat-mode) claude-pair-chat--pending)
+                    (current-buffer)
+                  (catch 'found
+                    (maphash (lambda (_id b)
+                               (when (and (buffer-live-p b)
+                                          (buffer-local-value 'claude-pair-chat--pending b))
+                                 (throw 'found b)))
+                             claude-pair-chat--buffers)
+                    nil))))
+    (unless buffer
+      (user-error "Claude is not waiting for an answer"))
+    (with-current-buffer buffer
+      (claude-pair-chat-answer-permission))))
+
 ;;;; Header line
 
 (defun claude-pair-chat--state-text ()
@@ -619,6 +922,7 @@ denied until permission prompts arrive.\n"
     ("writing" "writing…")
     ("tool" (format "running %s…" (or claude-pair-chat--tool "a tool")))
     ("cancelling" "stopping…")
+    ("waiting" "waiting for your answer")
     ("disconnected" "disconnected")
     (other other)))
 

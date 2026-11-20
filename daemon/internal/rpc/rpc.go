@@ -36,6 +36,13 @@ func Errorf(code int, format string, a ...any) *Error {
 // ErrClosed is returned by calls on a closed connection.
 var ErrClosed = errors.New("connection closed")
 
+// RequestCancelled is the error code for a request the peer cancelled with
+// $/cancelRequest, as in the Language Server Protocol.
+const RequestCancelled = -32800
+
+// cancelMethod is the notification either side sends to cancel a request.
+const cancelMethod = "$/cancelRequest"
+
 // Then is a handler result that runs After once the reply has been written.
 type Then struct {
 	Result any
@@ -65,6 +72,7 @@ type Conn struct {
 
 	mu      sync.Mutex
 	pending map[string]chan reply
+	cancels map[string]context.CancelFunc // running handlers, by request id
 	nextID  int64
 
 	closing  sync.Once
@@ -94,6 +102,7 @@ func New(id int, nc net.Conn, handle Handler, notify NotificationHandler, log *s
 		ctx:     ctx,
 		cancel:  cancel,
 		pending: map[string]chan reply{},
+		cancels: map[string]context.CancelFunc{},
 		done:    make(chan struct{}),
 	}
 }
@@ -151,6 +160,7 @@ func (c *Conn) Call(ctx context.Context, method string, params any) (json.RawMes
 		}
 		return r.result, nil
 	case <-ctx.Done():
+		_ = c.Notify(cancelMethod, map[string]int64{"id": id})
 		return nil, ctx.Err()
 	case <-c.done:
 		return nil, ErrClosed
@@ -288,6 +298,20 @@ func (c *Conn) dispatch(body []byte) {
 }
 
 func (c *Conn) runNotification(method string, params json.RawMessage) {
+	if method == cancelMethod {
+		var p struct {
+			ID json.RawMessage `json:"id"`
+		}
+		if json.Unmarshal(params, &p) == nil && len(p.ID) > 0 {
+			c.mu.Lock()
+			cancel := c.cancels[string(bytes.TrimSpace(p.ID))]
+			c.mu.Unlock()
+			if cancel != nil {
+				cancel()
+			}
+		}
+		return
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			c.log.Error("notification handler panicked", "method", method, "panic", r)
@@ -303,7 +327,21 @@ func (c *Conn) answer(id json.RawMessage, method string, params json.RawMessage)
 			c.sendError(id, protocol.InternalError, fmt.Sprint(r))
 		}
 	}()
-	result, err := c.handle(c.ctx, c, method, params)
+	key := string(bytes.TrimSpace(id))
+	ctx, cancel := context.WithCancel(c.ctx)
+	c.mu.Lock()
+	c.cancels[key] = cancel
+	c.mu.Unlock()
+	defer func() {
+		cancel()
+		c.mu.Lock()
+		delete(c.cancels, key)
+		c.mu.Unlock()
+	}()
+	result, err := c.handle(ctx, c, method, params)
+	if err == nil && ctx.Err() != nil && c.ctx.Err() == nil {
+		err = &Error{Code: RequestCancelled, Message: "request cancelled"}
+	}
 	if err != nil {
 		var re *Error
 		if !errors.As(err, &re) {

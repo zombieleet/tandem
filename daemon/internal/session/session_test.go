@@ -231,6 +231,23 @@ func TestFirstStartUsesSessionIDAndSafeFlags(t *testing.T) {
 	}
 }
 
+func TestHelperFlags(t *testing.T) {
+	s := New(Options{ID: "abc", Cwd: "/p", ClaudePath: "/c",
+		HelperCommand: []string{"/bin/claude-paird", "mcp", "--socket", "/run/d.sock", "--session", "abc"}})
+	args := strings.Join(s.Args(false), " ")
+	for _, want := range []string{
+		`--mcp-config {"mcpServers":{"emacs":{"args":["mcp","--socket","/run/d.sock","--session","abc"],"command":"/bin/claude-paird","timeout":86400000,"type":"stdio"}}}`,
+		"--permission-prompt-tool mcp__emacs__permission",
+	} {
+		if !strings.Contains(args, want) {
+			t.Errorf("args %q lack %q", args, want)
+		}
+	}
+	if strings.Contains(args, "--permission-prompts") {
+		t.Errorf("with a helper, prompts must reach it: %q", args)
+	}
+}
+
 func TestPromptWhileBusyFails(t *testing.T) {
 	r := newRecorder()
 	s, _ := newSession(t, r)
@@ -420,8 +437,8 @@ func TestToolTitles(t *testing.T) {
 		{"Bash", map[string]any{"command": strings.Repeat("x", 100)}, "Bash " + strings.Repeat("x", 79) + "…"},
 	}
 	for _, c := range cases {
-		if got := toolTitle(c.name, c.input, cwd); got != c.want {
-			t.Errorf("toolTitle(%s, %v) = %q, want %q", c.name, c.input, got, c.want)
+		if got := ToolTitle(c.name, c.input, cwd); got != c.want {
+			t.Errorf("ToolTitle(%s, %v) = %q, want %q", c.name, c.input, got, c.want)
 		}
 	}
 }

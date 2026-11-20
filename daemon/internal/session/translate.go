@@ -82,7 +82,7 @@ func (s *Session) assistantEvent(p *process, event map[string]any) []Update {
 		case "tool_use":
 			toolID, name := str(block, "id"), str(block, "name")
 			input := object(block["input"])
-			title := toolTitle(name, input, s.opts.Cwd)
+			title := ToolTitle(name, input, s.opts.Cwd)
 			p.tools[toolID] = toolStart{name: name, title: title, at: time.Now()}
 			updates = append(updates, Update{
 				"kind": "tool", "id": toolID, "name": name, "title": title, "status": "started",

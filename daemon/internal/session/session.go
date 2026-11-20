@@ -14,6 +14,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/victory/claude-pair/daemon/internal/mcphelper"
 )
 
 // Update is one session/update payload. "kind" says which fields it carries;
@@ -26,7 +28,11 @@ type Options struct {
 	Cwd        string
 	ClaudePath string
 	Model      string
-	Log        *slog.Logger
+	// HelperCommand starts the MCP helper ("claude-paird mcp ..."). When
+	// set, permission prompts go to its permission tool; when empty,
+	// anything that would ask is denied.
+	HelperCommand []string
+	Log           *slog.Logger
 	// Emit receives every update, in order, from one goroutine at a time.
 	Emit func(Update)
 	// OnIdle runs after a turn ends, once its updates have been emitted.
@@ -39,6 +45,9 @@ var (
 	// ErrClosed means the session was closed.
 	ErrClosed = errors.New("the session is closed")
 )
+
+// helperTimeoutMs is how long one MCP call may take: 24 hours.
+const helperTimeoutMs = 24 * 60 * 60 * 1000
 
 const (
 	cancelGrace = 5 * time.Second
@@ -97,6 +106,9 @@ func New(opts Options) *Session {
 
 // ID returns the session id, which is also Claude Code's session id.
 func (s *Session) ID() string { return s.opts.ID }
+
+// Cwd returns the project directory claude runs in.
+func (s *Session) Cwd() string { return s.opts.Cwd }
 
 // Busy reports whether a turn is running.
 func (s *Session) Busy() bool {
@@ -199,11 +211,22 @@ func (s *Session) Args(resume bool) []string {
 		"--verbose",
 		"--include-partial-messages",
 		"--permission-mode", "default",
-		// Until permission prompts reach Emacs (milestone 3), anything that
-		// would ask is denied.
-		"--permission-prompts", "none",
 		// Emacs owns every write (milestone 4); the built-in writers stay off.
 		"--disallowedTools", "Edit,Write,NotebookEdit",
+	}
+	if cmd := s.opts.HelperCommand; len(cmd) > 0 {
+		config, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{
+			mcphelper.ServerName: map[string]any{
+				"type": "stdio", "command": cmd[0], "args": cmd[1:],
+				// A review may wait for the user a long time; this per-server
+				// limit also overrides a short MCP_TOOL_TIMEOUT.
+				"timeout": helperTimeoutMs,
+			},
+		}})
+		args = append(args, "--mcp-config", string(config),
+			"--permission-prompt-tool", mcphelper.PermissionToolName)
+	} else {
+		args = append(args, "--permission-prompts", "none")
 	}
 	if s.opts.Model != "" {
 		args = append(args, "--model", s.opts.Model)

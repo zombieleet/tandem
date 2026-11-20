@@ -158,3 +158,14 @@ func TestHelp(t *testing.T) {
 		t.Fatalf("code %d, output %q", code, errOut)
 	}
 }
+
+func TestMCPHelperArguments(t *testing.T) {
+	_, errOut, code := paird(t, "mcp")
+	if code != 2 || !strings.Contains(errOut, "--socket and --session are required") {
+		t.Fatalf("code %d, stderr %q", code, errOut)
+	}
+	_, errOut, code = paird(t, "mcp", "--socket", "/nonexistent/d.sock", "--session", "x")
+	if code != 1 || !strings.Contains(errOut, "cannot reach claude-paird") {
+		t.Fatalf("code %d, stderr %q", code, errOut)
+	}
+}

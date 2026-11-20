@@ -182,31 +182,81 @@ Then open a file in a real project and run =M-x claude-pair=.
   your typing, not Claude's text
 - [X] Ask Claude to create a file: it can't, and the chat says why
 
-* DOING M3 · Permission prompts [0/6]
-- [ ] MCP helper =claude-paird mcp=: serves the Emacs tools over stdio
-  with the official Go MCP SDK, relays calls to the daemon's socket;
-  passed with =--mcp-config= and =--strict-mcp-config=
-- [ ] Permission tool via =--permission-prompt-tool=: =permission/request=
-  to Emacs, answered with one text block of JSON (allow, optionally with
-  =updatedInput=, or deny with a message), never =structuredContent=
-- [ ] Per-server MCP =timeout= set high, so your =MCP_TOOL_TIMEOUT= can't
-  cut a review short
-- [ ] "Always allow": check whether the permission tool accepts
-  =updatedPermissions=; otherwise write the rule to
-  =.claude/settings.local.json=
-- [ ] Cancelling the turn withdraws an open prompt in Emacs
-- [ ] Emacs prompt with =read-multiple-choice=: command shown fontified;
-  deny asks for a reason
+* DONE M3 · Permission prompts [6/6]
+- [X] MCP helper =claude-paird mcp=: serves the permission tool over
+  stdio with the official Go MCP SDK (v1.8.0) and relays each call to the
+  daemon's socket; passed with =--mcp-config=. Not with
+  =--strict-mcp-config=: your own MCP servers keep working
+- [X] Permission tool via =--permission-prompt-tool mcp__emacs__permission=:
+  the question goes to Emacs as a =permission= session update; the answer
+  goes back as one text block of JSON (allow with =updatedInput=, or deny
+  with a message), never =structuredContent=
+- [X] Per-server MCP =timeout= of 24 hours, so your =MCP_TOOL_TIMEOUT=
+  can't cut a question short
+- [X] "Always allow": =updatedPermissions= with an =addRules= entry for
+  =localSettings=; Claude Code applies it at once and saves it in
+  =.claude/settings.local.json= (checked live). The rule is the exact Bash
+  command, the WebFetch domain, or else the whole tool
+- [X] Cancelling the turn, closing the session, stopping the daemon or
+  Claude Code abandoning the call withdraws the question in Emacs
+  (new =$/cancelRequest= in the RPC layer, both directions)
+- [X] Emacs: the question appears in the chat, not the minibuffer, so a
+  stray keystroke can't approve anything; =y= / =a= / =n= / =d= with
+  point on it, =C-c C-p= menu (=read-multiple-choice=) from the composer,
+  =M-x claude-pair-answer-permission= from anywhere; Bash commands
+  fontified with =sh-mode=; the chat pops up if hidden
 ** Auto
-- [ ] Fake =claude= calling the helper: allow, deny with reason, always
-  allow, cancel while waiting
-- [ ] ERT: prompt text, answer mapping
-** Visual gate (live)
-- [ ] Ask Claude to run =ls=: the prompt shows the exact command
-- [ ] Deny with a reason: Claude's reply reflects your reason
-- [ ] "Always allow" for =ls=: the next =ls= runs without a prompt
+- [X] Go RPC: a cancelled call cancels the handler; closing the
+  connection cancels handlers; error codes survive
+- [X] Go daemon with the real helper and the fake =claude= acting as an
+  MCP client: allow, deny with and without a reason, always allow (second
+  identical call not asked), WebFetch rule is the domain, cancel
+  withdraws, answer errors, nobody to ask means denied, the helper is not
+  a client and does not keep the daemon alive
+- [X] ERT without a daemon: the question block, sh-mode colours, every
+  key, every outcome, withdrawn, the menu answers the oldest, answering
+  from another buffer, nothing to answer, fontifying makes no echo-area
+  noise, your own denials are not repeated, waiting time is not counted
+  as tool time
+- [X] ERT through the daemon, the helper and the fake =claude=: allow,
+  deny with a reason, always allow, cancel withdraws
+- [X] Bugs found by the live check and fixed: the M2 line "Not allowed
+  yet … until permission prompts arrive" still showed; =sh-mode= printed
+  "Setting up indent for shell type bash", hiding the question's message;
+  a tool line's duration included the time the question waited
+- Result on 20 Nov 2026: =make check= passes: all Go packages with the
+  race detector (server and session tests stable over 5 runs), 55 ERT
+  tests, 0 checkdoc warnings
+** Live checks run by Claude (19 and 20 Nov 2026, your login, about $0.40)
+- [X] =updatedPermissions= from a permission tool is applied at once and
+  saved to =.claude/settings.local.json=; Claude Code still asks again
+  for commands with =>>= redirection (its own policy)
+- [X] Through Emacs, the daemon, the helper and the real =claude=:
+  allow created =stamp.txt=; deny with a reason left =other.txt= absent
+  and Claude answered with the command instead; always allow asked once
+  for two identical commands and saved =Bash(touch twice.txt)=; cancel
+  while asking showed "Withdrawn" and "Stopped." and =late.txt= never
+  appeared
+** Visual gate (you moved on to M4 on 20 Nov 2026; tick these when you have run them)
+Rebuild the daemon and stop the old one first (protocol 0.3.0):
+: make daemon
+: emacs -Q -L ~/personal-projects/claude-pair/lisp --eval "(require 'claude-pair)"
+: M-x claude-pair-stop-daemon
+Then =M-x claude-pair= in a scratch project.
+- [ ] Ask Claude to run =touch hello.txt=: the question shows the exact
+  command, coloured, and the echo area tells you to answer in the chat
+- [ ] =y= on the question: the file appears, the question says "✓ Allowed"
+- [ ] Ask for =touch other.txt=, answer =d= with a reason: Claude's reply
+  follows your reason and the file is not created
+- [ ] Ask Claude to run the same harmless command twice, answer =a=: only
+  one question; =.claude/settings.local.json= has the rule
+- [ ] Ask for a command, then =C-c C-k= instead of answering: "Withdrawn"
+  and "Stopped."
+- [ ] Hide the chat window (=C-x 0= on it), ask from another buffer with
+  =M-x claude-pair= … the chat pops back when Claude asks; typing in
+  your other buffer never answers the question
 
-* TODO M4 · Edits with whole-edit review [0/9]
+* DOING M4 · Edits with whole-edit review [0/9]
 Phase 1 approves or rejects an edit as a whole. Per-hunk review is Phase 2.
 - [ ] MCP tools =edit_file= and =write_file= in the helper, with the
   same inputs as the built-in Edit and Write; built-in Edit, Write and

@@ -7,6 +7,7 @@
 ;;; Code:
 
 (require 'claude-pair)
+(require 'ert)
 
 (defun claude-pair-test--wait-for (predicate &optional timeout)
   "Wait until PREDICATE returns non-nil or TIMEOUT seconds pass.
@@ -44,6 +45,68 @@ Afterwards stop any daemon started there and delete the directory."
 (defun claude-pair-test--pid ()
   "Return the pid the connected daemon reported."
   (plist-get (claude-pair-rpc-server-info) :pid))
+
+(defconst claude-pair-test--fake-claude
+  (expand-file-name "../daemon/bin/fakeclaude"
+                    (file-name-directory (locate-library "claude-pair")))
+  "The stand-in for Claude Code that \"make fakeclaude\" builds.")
+
+(defmacro claude-pair-test-with-chat (&rest body)
+  "Run BODY in a fresh chat buffer that is not connected to any daemon."
+  (declare (indent 0) (debug t))
+  `(let ((buffer (generate-new-buffer "*claude-pair test*")))
+     (unwind-protect
+         (with-current-buffer buffer
+           (claude-pair-chat--setup "test-session" "/tmp/project")
+           ,@body)
+       (when-let* ((window (get-buffer-window buffer)))
+         (ignore-errors (delete-window window)))
+       (kill-buffer buffer))))
+
+(defun claude-pair-test--feed (&rest updates)
+  "Handle UPDATES as if they came from the daemon, then draw them."
+  (dolist (u updates)
+    (claude-pair-chat--handle-update u))
+  (claude-pair-chat--flush))
+
+(defun claude-pair-test--transcript ()
+  "Return the transcript text, without properties."
+  (buffer-substring-no-properties (point-min) claude-pair-chat--output))
+
+(defmacro claude-pair-test-with-project (&rest body)
+  "Run BODY with a daemon, the fake claude and a temporary project directory.
+BUFFER is bound to nil for BODY to set; it is killed afterwards."
+  (declare (indent 0) (debug t))
+  `(progn
+     (skip-unless (file-executable-p claude-pair-test--fake-claude))
+     (claude-pair-test-with-daemon-dir
+       (let* ((project (claude-pair-test--private-dir))
+              (default-directory (file-name-as-directory project))
+              (claude-pair-claude-command claude-pair-test--fake-claude)
+              (claude-pair-model nil)
+              (buffer nil))
+         (unwind-protect
+             (progn ,@body)
+           (when (buffer-live-p buffer)
+             (kill-buffer buffer))
+           (delete-directory project t))))))
+
+(defun claude-pair-test--say (buffer text)
+  "Send TEXT from BUFFER's composer and wait until Claude has answered."
+  (with-current-buffer buffer
+    (goto-char (point-max))
+    (insert text)
+    (claude-pair-chat-send))
+  (claude-pair-test--wait-idle buffer))
+
+(defun claude-pair-test--wait-idle (buffer)
+  "Wait until BUFFER's session is idle and everything is drawn."
+  (should (claude-pair-test--wait-for
+           (lambda ()
+             (with-current-buffer buffer
+               (and (equal claude-pair-chat--state "idle")
+                    (null claude-pair-chat--queue))))
+           10)))
 
 (provide 'claude-pair-test-helpers)
 ;;; claude-pair-test-helpers.el ends here

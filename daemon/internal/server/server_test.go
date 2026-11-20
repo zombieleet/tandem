@@ -34,6 +34,7 @@ func startDaemon(t *testing.T, idle time.Duration, prefix string) *Daemon {
 		SocketPath:  filepath.Join(privateDir(t, prefix), "d.sock"),
 		IdleTimeout: idle,
 		Version:     "9.9.9-test",
+		HelperPath:  helperBinary,
 	})
 	if err := d.Start(); err != nil {
 		t.Fatal(err)
@@ -193,7 +194,15 @@ func TestRequestBeforeInitialize(t *testing.T) {
 func TestIncompatibleProtocol(t *testing.T) {
 	d := startDaemon(t, 0, "cpd-")
 	c := connect(t, d.opts.SocketPath)
-	for _, v := range []string{"1.0.0", "0.1.0", "0.3.0"} {
+	cur, _ := protocol.ParseVersion(protocol.Version)
+	incompatible := []string{
+		fmt.Sprintf("%d.0.0", cur[0]+1),
+		fmt.Sprintf("%d.%d.0", cur[0], cur[1]+1),
+	}
+	if cur[1] > 0 {
+		incompatible = append(incompatible, fmt.Sprintf("%d.%d.0", cur[0], cur[1]-1))
+	}
+	for _, v := range incompatible {
 		m := c.initialize(v)
 		wantCode(t, m, protocol.IncompatibleProtocol)
 		if !strings.Contains(m.Error.Message, v) || !strings.Contains(m.Error.Message, protocol.Version) {

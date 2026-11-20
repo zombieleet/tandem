@@ -43,18 +43,25 @@ type Options struct {
 	IdleTimeout time.Duration
 	Version     string
 	Log         *slog.Logger
+	// HelperPath is the claude-paird executable that Claude Code starts as
+	// "claude-paird mcp". It defaults to this program.
+	HelperPath string
 }
 
 type client struct {
 	conn        *rpc.Conn
 	initialized atomic.Bool
 	name        atomic.Value // string
+	isHelper    atomic.Bool  // an MCP helper, not an Emacs
 }
+
+func (c *client) helper() bool { return c.isHelper.Load() }
 
 // sessionEntry is a session and the clients that receive its updates.
 type sessionEntry struct {
 	s    *session.Session
 	subs map[*client]bool
+	last *client // sent the last prompt; answers permission prompts
 }
 
 // Daemon serves clients on a Unix socket.
@@ -65,13 +72,14 @@ type Daemon struct {
 	started time.Time
 	wg      sync.WaitGroup
 
-	mu         sync.Mutex
-	clients    map[int]*client
-	sessions   map[string]*sessionEntry
-	nextClient int
-	idle       *time.Timer
-	stopping   bool
-	reason     string
+	mu          sync.Mutex
+	clients     map[int]*client
+	sessions    map[string]*sessionEntry
+	permissions map[string]*pendingPermission
+	nextClient  int
+	idle        *time.Timer
+	stopping    bool
+	reason      string
 
 	stopOnce sync.Once
 	done     chan struct{}
@@ -82,7 +90,16 @@ func New(opts Options) *Daemon {
 	if opts.Log == nil {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Daemon{opts: opts, clients: map[int]*client{}, sessions: map[string]*sessionEntry{}, done: make(chan struct{})}
+	if opts.HelperPath == "" {
+		opts.HelperPath, _ = os.Executable()
+	}
+	return &Daemon{
+		opts:        opts,
+		clients:     map[int]*client{},
+		sessions:    map[string]*sessionEntry{},
+		permissions: map[string]*pendingPermission{},
+		done:        make(chan struct{}),
+	}
 }
 
 // Done is closed once the daemon has stopped.
@@ -149,6 +166,11 @@ func (d *Daemon) Stop(reason string) {
 		for _, e := range d.sessions {
 			sessions = append(sessions, e.s)
 		}
+		d.mu.Unlock()
+		for _, s := range sessions {
+			d.withdrawPermissions(s.ID(), "claude-paird is stopping.")
+		}
+		d.mu.Lock()
 		d.sessions = map[string]*sessionEntry{}
 		d.mu.Unlock()
 
@@ -184,7 +206,7 @@ func (d *Daemon) Stop(reason string) {
 // Status reports the daemon's state.
 func (d *Daemon) Status() protocol.StatusResult {
 	d.mu.Lock()
-	clients, sessions := len(d.clients), len(d.sessions)
+	clients, sessions := d.emacsClientsLocked(), len(d.sessions)
 	d.mu.Unlock()
 	return protocol.StatusResult{
 		Version:            d.opts.Version,
@@ -225,7 +247,7 @@ func (d *Daemon) accept(nc *net.UnixConn) {
 	c := &client{}
 	c.name.Store("")
 	c.conn = rpc.New(id, nc, func(ctx context.Context, _ *rpc.Conn, method string, params json.RawMessage) (any, error) {
-		return d.handle(c, method, params)
+		return d.handle(ctx, c, method, params)
 	}, nil, d.opts.Log)
 	d.clients[id] = c
 	if d.idle != nil {
@@ -249,7 +271,7 @@ func (d *Daemon) accept(nc *net.UnixConn) {
 	}()
 }
 
-func (d *Daemon) handle(c *client, method string, params json.RawMessage) (any, error) {
+func (d *Daemon) handle(ctx context.Context, c *client, method string, params json.RawMessage) (any, error) {
 	if method == "initialize" {
 		return d.initialize(c, params)
 	}
@@ -264,10 +286,12 @@ func (d *Daemon) handle(c *client, method string, params json.RawMessage) (any, 
 	case "session/prompt":
 		return d.prompt(c, params)
 	case "session/cancel":
-		e, err := d.lookup(params, nil)
+		var id string
+		e, err := d.lookup(params, &id)
 		if err != nil {
 			return nil, err
 		}
+		d.withdrawPermissions(id, "The user stopped the turn.")
 		return map[string]bool{"cancelled": e.s.Cancel()}, nil
 	case "session/close":
 		var id string
@@ -275,12 +299,17 @@ func (d *Daemon) handle(c *client, method string, params json.RawMessage) (any, 
 		if err != nil {
 			return nil, err
 		}
+		d.withdrawPermissions(id, "The session was closed.")
 		d.mu.Lock()
 		delete(d.sessions, id)
 		d.mu.Unlock()
 		e.s.Close()
 		d.armIdle()
 		return map[string]bool{"ok": true}, nil
+	case "helper/permission":
+		return d.askPermission(ctx, c, params)
+	case "permission/answer":
+		return d.answerPermission(c, params)
 	case "shutdown":
 		return rpc.Then{
 			Result: map[string]bool{"ok": true},
@@ -307,6 +336,9 @@ func (d *Daemon) initialize(c *client, params json.RawMessage) (any, error) {
 	c.initialized.Store(true)
 	if p.ClientInfo != nil {
 		c.name.Store(p.ClientInfo.Name)
+	}
+	if role, _ := p.Capabilities["role"].(string); role == "mcp-helper" {
+		c.isHelper.Store(true)
 	}
 	d.opts.Log.Info("client initialized", "client", c.conn.ID, "name", c.name.Load())
 	return protocol.InitializeResult{
@@ -341,9 +373,11 @@ func (d *Daemon) newSession(c *client, params json.RawMessage) (any, error) {
 		Cwd:        p.Cwd,
 		ClaudePath: p.ClaudePath,
 		Model:      p.Model,
-		Log:        d.opts.Log,
-		Emit:       func(u session.Update) { d.broadcast(id, u) },
-		OnIdle:     d.armIdle,
+		HelperCommand: []string{d.opts.HelperPath, "mcp",
+			"--socket", d.opts.SocketPath, "--session", id},
+		Log:    d.opts.Log,
+		Emit:   func(u session.Update) { d.broadcast(id, u) },
+		OnIdle: d.armIdle,
 	})
 	d.mu.Lock()
 	d.sessions[id] = &sessionEntry{s: s, subs: map[*client]bool{c: true}}
@@ -364,6 +398,7 @@ func (d *Daemon) prompt(c *client, params json.RawMessage) (any, error) {
 	e, ok := d.sessions[p.SessionID]
 	if ok {
 		e.subs[c] = true
+		e.last = c
 	}
 	d.mu.Unlock()
 	if !ok {
@@ -427,11 +462,22 @@ func newSessionID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
+// emacsClientsLocked counts connected clients other than MCP helpers.
+func (d *Daemon) emacsClientsLocked() int {
+	n := 0
+	for _, c := range d.clients {
+		if !c.helper() {
+			n++
+		}
+	}
+	return n
+}
+
 // armIdle starts the idle timer when no client is connected and no turn runs.
 func (d *Daemon) armIdle() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.opts.IdleTimeout <= 0 || len(d.clients) > 0 || d.stopping {
+	if d.opts.IdleTimeout <= 0 || d.emacsClientsLocked() > 0 || d.stopping {
 		return
 	}
 	for _, e := range d.sessions {

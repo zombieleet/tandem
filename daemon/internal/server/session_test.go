@@ -17,7 +17,7 @@ import (
 	"github.com/victory/claude-pair/daemon/internal/session"
 )
 
-var fakeClaude string
+var fakeClaude, helperBinary string
 
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "cpd-fake-")
@@ -25,8 +25,11 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	fakeClaude = filepath.Join(dir, "fakeclaude")
-	if out, err := exec.Command("go", "build", "-o", fakeClaude, "../testutil/fakeclaude").CombinedOutput(); err != nil {
-		panic(fmt.Sprintf("building fakeclaude: %v\n%s", err, out))
+	helperBinary = filepath.Join(dir, "claude-paird")
+	for out, pkg := range map[string]string{fakeClaude: "../testutil/fakeclaude", helperBinary: "../../cmd/claude-paird"} {
+		if msg, err := exec.Command("go", "build", "-o", out, pkg).CombinedOutput(); err != nil {
+			panic(fmt.Sprintf("building %s: %v\n%s", pkg, err, msg))
+		}
 	}
 	code := m.Run()
 	os.RemoveAll(dir)

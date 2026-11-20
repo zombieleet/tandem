@@ -3,7 +3,13 @@
 // Claude Code 2.1.327, and never calls a model.
 //
 // A prompt "script:NAME[:ARG]" picks a scenario: hello, args, nostream,
-// tools, slow:N, crash, fail, subagent. Any other prompt is echoed back.
+// tools, slow:N, crash, fail, subagent, bash:CMD, bash2:CMD (the same
+// command twice), sleepbash:MS:CMD, webfetch:URL. Any other prompt is echoed back.
+//
+// For bash and webfetch it asks --permission-prompt-tool through the MCP
+// server in --mcp-config, as Claude Code does, and applies "always" rules
+// it gets back to later calls. Without a permission tool it denies.
+// FAKE_CLAUDE_EVENTS_LOG names a file that gets one line per decision.
 // SIGINT during a turn ends it as Claude Code does: an error_during_execution
 // result, then exit 0. FAKE_CLAUDE_VERSION sets the --version output, and
 // FAKE_CLAUDE_ARGS_LOG names a file that gets one line of arguments per start.
@@ -11,15 +17,21 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 var (
@@ -29,6 +41,14 @@ var (
 	turns       int
 	interrupted atomic.Bool
 	msgCounter  int
+
+	mcpConfig  string
+	permTool   string
+	mcpSession *mcp.ClientSession
+	rules      []map[string]any // allow rules from "always" answers
+
+	callMu     sync.Mutex
+	callCancel context.CancelFunc
 )
 
 func main() {
@@ -48,8 +68,16 @@ func main() {
 		}
 	}
 	for i, a := range args {
-		if (a == "--session-id" || a == "--resume") && i+1 < len(args) {
+		if i+1 >= len(args) {
+			break
+		}
+		switch a {
+		case "--session-id", "--resume":
 			sessionID = args[i+1]
+		case "--mcp-config":
+			mcpConfig = args[i+1]
+		case "--permission-prompt-tool":
+			permTool = args[i+1]
 		}
 	}
 
@@ -62,6 +90,11 @@ func main() {
 				os.Exit(0)
 			}
 			interrupted.Store(true)
+			callMu.Lock()
+			if callCancel != nil {
+				callCancel()
+			}
+			callMu.Unlock()
 		}
 	}()
 
@@ -124,6 +157,13 @@ func turn(prompt string, args []string) {
 		if streamText(chunks, 20*time.Millisecond) {
 			result("success", false, nil)
 		}
+	case "bash", "bash2", "webfetch":
+		permissionScenario(name, arg)
+	case "sleepbash": // sleepbash:MS:CMD waits MS milliseconds, then asks to run CMD
+		ms, cmd, _ := strings.Cut(arg, ":")
+		n, _ := strconv.Atoi(ms)
+		time.Sleep(time.Duration(n) * time.Millisecond)
+		permissionScenario("bash", cmd)
 	case "crash":
 		fmt.Fprintln(os.Stderr, "fatal: something broke")
 		out.Flush()
@@ -142,6 +182,171 @@ func turn(prompt string, args []string) {
 	default:
 		streamText([]string{"You said: ", prompt}, 0)
 		result("success", false, nil)
+	}
+}
+
+func permissionScenario(name, arg string) {
+	times := 1
+	if name == "bash2" {
+		times = 2
+	}
+	var summary []string
+	var denials []map[string]any
+	for i := range times {
+		toolID := fmt.Sprintf("toolu_p%d_%d", turns, i)
+		tool, input := "Bash", map[string]any{"command": arg, "description": "Run it"}
+		if name == "webfetch" {
+			tool, input = "WebFetch", map[string]any{"url": arg, "prompt": "Summarize"}
+		}
+		assistant(nextMsg(), map[string]any{"type": "tool_use", "id": toolID, "name": tool, "input": input})
+		if rule := matchingRule(tool, input); rule != "" {
+			logEvent("%s %s -> allowed by rule %s", tool, arg, rule)
+			toolResult(toolID, "ran: "+arg, false)
+			summary = append(summary, "allowed by rule: "+arg)
+			continue
+		}
+		decision, err := ask(tool, input, toolID)
+		if interrupted.Load() {
+			interruptTurn(nextMsg(), "")
+		}
+		if err != nil {
+			logEvent("%s %s -> error %v", tool, arg, err)
+			toolResult(toolID, "permission tool failed: "+err.Error(), true)
+			summary = append(summary, "permission tool failed: "+err.Error())
+			denials = append(denials, map[string]any{"tool_name": tool, "tool_use_id": toolID, "tool_input": input})
+			continue
+		}
+		if decision["behavior"] == "allow" {
+			saved := saveRules(decision["updatedPermissions"])
+			logEvent("%s %s -> allow%s", tool, arg, saved)
+			toolResult(toolID, "ran: "+arg, false)
+			summary = append(summary, "allowed: "+arg+saved)
+		} else {
+			message, _ := decision["message"].(string)
+			logEvent("%s %s -> deny %s", tool, arg, message)
+			toolResult(toolID, "denied: "+message, true)
+			summary = append(summary, "denied: "+message)
+			denials = append(denials, map[string]any{"tool_name": tool, "tool_use_id": toolID, "tool_input": input})
+		}
+	}
+	streamText([]string{strings.Join(summary, "\n")}, 0)
+	result("success", false, map[string]any{"permission_denials": denials})
+}
+
+// ask calls the permission prompt tool the way Claude Code does, and checks
+// the answer as strictly: exactly one text block, no structured content.
+func ask(tool string, input map[string]any, toolUseID string) (map[string]any, error) {
+	if permTool == "" {
+		return map[string]any{"behavior": "deny", "message": "no permission prompt tool"}, nil
+	}
+	server, toolName, ok := strings.Cut(strings.TrimPrefix(permTool, "mcp__"), "__")
+	if !ok {
+		return nil, fmt.Errorf("bad --permission-prompt-tool %q", permTool)
+	}
+	if mcpSession == nil {
+		cs, err := connect(server)
+		if err != nil {
+			return nil, err
+		}
+		mcpSession = cs
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	callMu.Lock()
+	callCancel = cancel
+	callMu.Unlock()
+	defer func() {
+		callMu.Lock()
+		callCancel = nil
+		callMu.Unlock()
+		cancel()
+	}()
+	res, err := mcpSession.CallTool(ctx, &mcp.CallToolParams{Name: toolName, Arguments: map[string]any{
+		"tool_name": tool, "input": input, "tool_use_id": toolUseID,
+	}})
+	if err != nil {
+		return nil, err
+	}
+	if res.StructuredContent != nil || len(res.Content) != 1 {
+		return nil, errors.New("Permission prompt tool returned an invalid result. Expected a single text block")
+	}
+	text, ok := res.Content[0].(*mcp.TextContent)
+	if !ok {
+		return nil, errors.New("Permission prompt tool returned an invalid result. Expected a single text block")
+	}
+	var decision map[string]any
+	if err := json.Unmarshal([]byte(text.Text), &decision); err != nil {
+		return nil, fmt.Errorf("Permission prompt tool returned invalid JSON: %v", err)
+	}
+	return decision, nil
+}
+
+func connect(server string) (*mcp.ClientSession, error) {
+	var config struct {
+		MCPServers map[string]struct {
+			Type    string   `json:"type"`
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(mcpConfig), &config); err != nil {
+		return nil, fmt.Errorf("bad --mcp-config: %v", err)
+	}
+	entry, ok := config.MCPServers[server]
+	if !ok || entry.Type != "stdio" {
+		return nil, fmt.Errorf("no stdio MCP server %q in --mcp-config", server)
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "fakeclaude", Version: "2.1.327"}, nil)
+	return client.Connect(context.Background(), &mcp.CommandTransport{Command: exec.Command(entry.Command, entry.Args...)}, nil)
+}
+
+// saveRules keeps addRules entries and describes them, like " (rule: Bash(x))".
+func saveRules(v any) string {
+	updates, _ := v.([]any)
+	var saved []string
+	for _, u := range updates {
+		update, _ := u.(map[string]any)
+		if update["type"] != "addRules" || update["behavior"] != "allow" {
+			continue
+		}
+		list, _ := update["rules"].([]any)
+		for _, r := range list {
+			rule, _ := r.(map[string]any)
+			rules = append(rules, rule)
+			text, _ := rule["toolName"].(string)
+			if content, _ := rule["ruleContent"].(string); content != "" {
+				text += "(" + content + ")"
+			}
+			saved = append(saved, fmt.Sprintf("%s in %s", text, update["destination"]))
+		}
+	}
+	if len(saved) == 0 {
+		return ""
+	}
+	return " (rule: " + strings.Join(saved, ", ") + ")"
+}
+
+func matchingRule(tool string, input map[string]any) string {
+	for _, rule := range rules {
+		if rule["toolName"] != tool {
+			continue
+		}
+		content, _ := rule["ruleContent"].(string)
+		cmd, _ := input["command"].(string)
+		if content == "" || content == cmd {
+			return fmt.Sprint(rule["toolName"], "(", content, ")")
+		}
+	}
+	return ""
+}
+
+func logEvent(format string, a ...any) {
+	path := os.Getenv("FAKE_CLAUDE_EVENTS_LOG")
+	if path == "" {
+		return
+	}
+	if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+		fmt.Fprintf(f, format+"\n", a...)
+		f.Close()
 	}
 }
 
@@ -185,13 +390,7 @@ func streamTextAs(id string, chunks []string, delay time.Duration) bool {
 		if interrupted.Load() {
 			emit(streamEvent(id, map[string]any{"type": "content_block_stop", "index": 0}))
 			emit(streamEvent(id, map[string]any{"type": "message_stop"}))
-			assistant(id, map[string]any{"type": "text", "text": text.String()})
-			emit(map[string]any{"type": "user", "parent_tool_use_id": nil, "session_id": sessionID,
-				"message": map[string]any{"role": "user", "content": []map[string]any{
-					{"type": "text", "text": "[Request interrupted by user]"}}}})
-			result("error_during_execution", true, nil)
-			out.Flush()
-			os.Exit(0)
+			interruptTurn(id, text.String())
 		}
 		text.WriteString(c)
 		emit(streamEvent(id, map[string]any{"type": "content_block_delta", "index": 0,
@@ -204,6 +403,22 @@ func streamTextAs(id string, chunks []string, delay time.Duration) bool {
 	emit(streamEvent(id, map[string]any{"type": "message_stop"}))
 	assistant(id, map[string]any{"type": "text", "text": text.String()})
 	return true
+}
+
+// interruptTurn ends the turn as Claude Code does after SIGINT, and exits.
+func interruptTurn(id, partial string) {
+	if partial != "" {
+		assistant(id, map[string]any{"type": "text", "text": partial})
+	}
+	emit(map[string]any{"type": "user", "parent_tool_use_id": nil, "session_id": sessionID,
+		"message": map[string]any{"role": "user", "content": []map[string]any{
+			{"type": "text", "text": "[Request interrupted by user]"}}}})
+	result("error_during_execution", true, nil)
+	out.Flush()
+	if mcpSession != nil {
+		mcpSession.Close()
+	}
+	os.Exit(0)
 }
 
 func nextMsg() string {

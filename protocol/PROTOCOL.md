@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.2.0**. This document is the contract between the Emacs client
+Version **0.3.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -40,9 +40,12 @@ Content-Length: <bytes>\r\n
 ## Messages
 
 Bodies are [JSON-RPC 2.0](https://www.jsonrpc.org/specification) requests,
-responses and notifications. Both sides may send requests: the client calls
-the daemon, and from version 0.2 the daemon calls the client for reviews,
-permission questions and Emacs tools.
+responses and notifications. Both sides may send requests.
+
+Either side may cancel a request it sent with the notification
+`$/cancelRequest` `{id}`, as in the Language Server Protocol. The receiver
+stops the work and answers `-32800`. Closing the connection cancels every
+request the receiver is still working on.
 
 ## Lifecycle
 
@@ -120,13 +123,19 @@ Each session runs one process:
 ```
 claude -p --input-format stream-json --output-format stream-json --verbose
        --include-partial-messages --permission-mode default
-       --permission-prompts none --disallowedTools Edit,Write,NotebookEdit
+       --disallowedTools Edit,Write,NotebookEdit
+       --mcp-config '{"mcpServers":{"emacs":{"type":"stdio",
+           "command":"<claude-paird>","args":["mcp","--socket",S,"--session",ID],
+           "timeout":86400000}}}'
+       --permission-prompt-tool mcp__emacs__permission
        [--model M] (--session-id ID | --resume ID)
 ```
 
-The first start uses `--session-id`; every later start uses `--resume`. In
-0.2, tools that would ask for permission are denied, and the built-in
-writing tools are off, because Emacs will own every write.
+The first start uses `--session-id`; every later start uses `--resume`. The
+built-in writing tools are off, because Emacs will own every write. The
+user's own MCP servers and settings still load. The 24-hour per-server
+`timeout` lets a permission question wait for the user, and overrides a
+shorter `MCP_TOOL_TIMEOUT`.
 
 ### `session/cancel` (client → daemon)
 
@@ -151,9 +160,47 @@ Params: `{sessionId, update}`. `update.kind` is one of:
 | `todo` | `items`: `[{content, status}]` | Claude's todo list, replaced whole |
 | `result` | `subtype`, `isError`, `cancelled`, `message`, `durationMs`, `numTurns`, `costUsd`, `sessionCostUsd`, `usage`, `permissionDenials` | The turn ended; `costUsd` is this turn's cost |
 | `error` | `message`, `stderr`, `exitCode` | `claude` stopped unexpectedly |
+| `permission` | `requestId`, `state`, and the fields below | A permission question (see below) |
 
 Every turn ends with a `result` (or an `error`) followed by `status` `idle`.
 Events from subagents are left out; the subagent's own tool call shows instead.
+
+## Permission questions
+
+Claude Code asks before running a tool that needs approval. It does so by
+calling the permission tool of the MCP helper, `claude-paird mcp`, which it
+starts from `--mcp-config`. The helper connects to the daemon's socket and
+sends `initialize` with `capabilities: {role: "mcp-helper", sessionId}`.
+Helpers do not count as clients, neither in `daemon/status` nor for the idle
+timeout.
+
+1. The helper sends `helper/permission` `{sessionId, toolName, input,
+   toolUseId}` and waits.
+2. The daemon picks who answers: the client that sent the session's last
+   prompt if it is still connected, otherwise any client that follows the
+   session. When none is connected, it denies at once.
+3. Followers get `session/update` with `kind: "permission"`, `state:
+   "pending"`, `requestId`, `toolName`, `toolUseId`, `input`, `title` (one
+   line, as for tool calls) and `alwaysRule` (the rule "always allow" adds,
+   such as `Bash(make test)`).
+4. The client answers with `permission/answer` `{requestId, decision:
+   "allow" | "deny", always, message}`. A request that is no longer pending
+   fails with `-32006`.
+5. Followers get `state: "answered"` with `decision`, `always` and `message`.
+   A request is instead `state: "withdrawn"` with a `reason` when the turn is
+   cancelled, the session closes, the daemon stops, or Claude Code abandons
+   the call.
+6. The helper returns the decision to Claude Code as one text block of JSON:
+   `{"behavior":"allow","updatedInput":...}` or
+   `{"behavior":"deny","message":...}`. For "always", the allow carries
+   `updatedPermissions` with an `addRules` entry for `localSettings`, so
+   Claude Code applies the rule at once and saves it in the project's
+   `.claude/settings.local.json`.
+
+"Always allow" adds the narrowest rule that covers the call: the exact Bash
+command, the WebFetch domain (`WebFetch(domain:example.com)`), or else the
+whole tool. Claude Code itself still asks again for Bash commands with
+output redirection such as `>>`, whatever the rules say.
 
 ### `shutdown` (client → daemon)
 
@@ -174,3 +221,5 @@ every connection, removes its socket and exits.
 | `-32003` | Session busy: a turn is running |
 | `-32004` | Unknown session |
 | `-32005` | Claude Code unavailable: missing, not executable, too old, or failed to start |
+| `-32006` | Unknown permission request: answered or withdrawn already |
+| `-32800` | Request cancelled with `$/cancelRequest` |

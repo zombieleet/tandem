@@ -6,11 +6,10 @@ in its headless stream-json mode. Emacs is the client: a chat buffer, Claude's
 edits reviewed in your real buffers, and windows Claude opens for you within
 limits you set.
 
-**Status:** phase 1, milestone 2. You can chat with Claude about a project,
-watch its tool calls, and stop an answer. Claude can read your project but
-cannot change it yet: tools that need your approval are denied until
-permission prompts arrive (milestone 3), and Emacs-owned edits come in
-milestone 4. See [PHASE-1.org](PHASE-1.org).
+**Status:** phase 1, milestone 3. You can chat with Claude about a project,
+watch its tool calls, stop an answer, and allow or deny each command Claude
+wants to run. Claude's built-in file editing stays off until Emacs-owned
+edits arrive in milestone 4. See [PHASE-1.org](PHASE-1.org).
 
 ## Requirements
 
@@ -57,10 +56,30 @@ In the chat buffer, type after the `❯` prompt:
 |---|---|
 | `C-c C-c` | Send your message |
 | `C-c C-k` | Stop Claude's answer; your next message continues the conversation |
+| `C-c C-p` | Answer Claude's oldest permission question from a menu |
 | `M-p` / `M-n` | Step through messages you sent earlier |
 
 The header line shows the model, what Claude is doing, and the session's cost
 so far. Each tool call is one line: `▸` while it runs, `✓` or `✗` when done.
+
+## Permission questions
+
+When Claude wants to run a command, fetch a page or use another tool that
+needs your approval, the question appears in the chat:
+
+```
+  ⏸ Claude wants to run:
+      make test
+    y allow once   a always allow Bash(make test)   n deny   d deny with a reason
+```
+
+With point on the question, press the key. `a` adds the rule shown, which
+Claude Code saves in the project's `.claude/settings.local.json`, the same
+file its own "don't ask again" uses. `d` asks what to tell Claude instead.
+If the chat is hidden it pops up, and the echo area says a question is
+waiting. Nothing is asked in the minibuffer behind your back, so a stray
+keystroke elsewhere cannot approve a command. `M-x claude-pair-answer-permission`
+answers from any buffer; bind it to a key if you like.
 
 ## Credentials
 

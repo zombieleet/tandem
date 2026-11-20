@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/victory/claude-pair/daemon/internal/mcphelper"
 	"github.com/victory/claude-pair/daemon/internal/paths"
 	"github.com/victory/claude-pair/daemon/internal/protocol"
 	"github.com/victory/claude-pair/daemon/internal/server"
@@ -26,6 +28,7 @@ import (
 const exitAlreadyRunning = 3
 
 const usage = `Usage: claude-paird [options]
+       claude-paird mcp --socket PATH --session ID
 
 Daemon that connects the claude-pair Emacs package to Claude.
 
@@ -38,6 +41,9 @@ Options:
   --ready-timeout SEC    With --detach, how long to wait for the socket (default: 10)
   --version              Print the version and exit
   --help                 Print this help and exit
+
+"claude-paird mcp" is started by Claude Code, not by you: it answers Claude
+Code's permission prompts by asking Emacs through the daemon.
 `
 
 func main() {
@@ -45,6 +51,9 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "mcp" {
+		return runMCP(args[1:], stderr)
+	}
 	flags := flag.NewFlagSet("claude-paird", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.Usage = func() { fmt.Fprintf(stderr, usage, paths.DefaultSocketPath()) }
@@ -99,6 +108,28 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runDetached(child, path, *logFile, readyTimeout, stdout, stderr)
 	}
 	return runForeground(path, idleTimeout, *logFile, level, stderr)
+}
+
+// runMCP serves the MCP helper on stdin and stdout. Its log goes to stderr,
+// which Claude Code keeps out of the conversation.
+func runMCP(args []string, stderr io.Writer) int {
+	flags := flag.NewFlagSet("claude-paird mcp", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	socket := flags.String("socket", "", "")
+	sessionID := flags.String("session", "", "")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if *socket == "" || *sessionID == "" {
+		fmt.Fprintln(stderr, "claude-paird mcp: --socket and --session are required")
+		return 2
+	}
+	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	if err := mcphelper.Run(context.Background(), *socket, *sessionID, log); err != nil {
+		fmt.Fprintf(stderr, "claude-paird mcp: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func seconds(value, flagName string) (time.Duration, error) {

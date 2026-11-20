@@ -5,9 +5,9 @@ import (
 	"strings"
 )
 
-// toolTitle is the one-line description Emacs shows for a tool call, such as
+// ToolTitle is the one-line description Emacs shows for a tool call, such as
 // "Read src/api.ts" or "Bash make test".
-func toolTitle(name string, input map[string]any, cwd string) string {
+func ToolTitle(name string, input map[string]any, cwd string) string {
 	str := func(key string) string {
 		v, _ := input[key].(string)
 		return v
