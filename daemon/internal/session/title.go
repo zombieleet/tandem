@@ -36,6 +36,12 @@ func ToolTitle(name string, input map[string]any, cwd string) string {
 		detail = str("description")
 	case "TodoWrite":
 		detail = "todo list"
+	case "ToolSearch":
+		detail = str("query")
+	case "mcp__emacs__edit_file":
+		return "Edit " + relative(str("file_path"), cwd)
+	case "mcp__emacs__write_file":
+		return "Write " + relative(str("file_path"), cwd)
 	default:
 		if server, tool, ok := strings.Cut(strings.TrimPrefix(name, "mcp__"), "__"); ok && strings.HasPrefix(name, "mcp__") {
 			return server + ": " + tool

@@ -54,6 +54,25 @@ func (r *recorder) idle() {
 	r.mu.Unlock()
 }
 
+// waitIdles waits until OnIdle has run n times. OnIdle runs just after the
+// idle update is emitted, so a test must not read the count straight away.
+func (r *recorder) waitIdles(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		r.mu.Lock()
+		got := r.idles
+		r.mu.Unlock()
+		if got == n {
+			return
+		}
+		if got > n || time.Now().After(deadline) {
+			t.Fatalf("OnIdle ran %d times, want %d", got, n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func (r *recorder) snapshot() []Update {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -147,9 +166,7 @@ func TestHelloStreamsTextInOrder(t *testing.T) {
 	if init["model"] != "claude-fake-1" || init["claudeVersion"] != "2.1.327" {
 		t.Fatalf("init %v", init)
 	}
-	if r.idles != 1 {
-		t.Fatalf("OnIdle ran %d times", r.idles)
-	}
+	r.waitIdles(t, 1)
 }
 
 func TestTextThatDidNotStreamStillArrives(t *testing.T) {
@@ -238,6 +255,8 @@ func TestHelperFlags(t *testing.T) {
 	for _, want := range []string{
 		`--mcp-config {"mcpServers":{"emacs":{"args":["mcp","--socket","/run/d.sock","--session","abc"],"command":"/bin/claude-paird","timeout":86400000,"type":"stdio"}}}`,
 		"--permission-prompt-tool mcp__emacs__permission",
+		"--allowedTools mcp__emacs__edit_file,mcp__emacs__write_file",
+		"--append-system-prompt " + EditingPrompt,
 	} {
 		if !strings.Contains(args, want) {
 			t.Errorf("args %q lack %q", args, want)
@@ -307,9 +326,7 @@ func TestCrashIsReportedAndTheNextPromptResumes(t *testing.T) {
 	if e["exitCode"] != 3 || !strings.Contains(e["stderr"].(string), "fatal: something broke") {
 		t.Fatalf("error %v", e)
 	}
-	if r.idles != 1 {
-		t.Fatalf("OnIdle ran %d times", r.idles)
-	}
+	r.waitIdles(t, 1)
 	before := len(r.snapshot())
 	if err := s.Prompt("script:args"); err != nil {
 		t.Fatalf("prompt after a crash: %v", err)
@@ -434,6 +451,9 @@ func TestToolTitles(t *testing.T) {
 		{"WebFetch", map[string]any{"url": "https://example.com"}, "WebFetch https://example.com"},
 		{"mcp__emacs__open_file", map[string]any{"path": "x"}, "emacs: open_file"},
 		{"Mystery", map[string]any{}, "Mystery"},
+		{"ToolSearch", map[string]any{"query": "select:mcp__emacs__edit_file"}, "ToolSearch select:mcp__emacs__edit_file"},
+		{"mcp__emacs__edit_file", map[string]any{"file_path": "/work/proj/a.txt"}, "Edit a.txt"},
+		{"mcp__emacs__write_file", map[string]any{"file_path": "/work/proj/docs/b.md"}, "Write docs/b.md"},
 		{"Bash", map[string]any{"command": strings.Repeat("x", 100)}, "Bash " + strings.Repeat("x", 79) + "…"},
 	}
 	for _, c := range cases {

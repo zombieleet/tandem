@@ -128,6 +128,58 @@
       (should (string-match-p "claude-pair-stop-daemon" (cadr err)))
       (should-not (claude-pair-rpc-live-p)))))
 
+(ert-deftest claude-pair-rpc-stop-daemon-works-across-protocols ()
+  (claude-pair-test-with-daemon-dir
+    (claude-pair-connect)
+    (claude-pair-disconnect)
+    (let ((claude-pair-rpc-protocol-version "9.0.0"))
+      (should-error (claude-pair-connect) :type 'claude-pair-rpc-incompatible)
+      (claude-pair-stop-daemon))
+    (should-not (file-exists-p claude-pair-socket-path))))
+
+(ert-deftest claude-pair-rpc-a-daemon-too-old-for-shutdown-gets-sigterm ()
+  (claude-pair-test-with-daemon-dir
+    (claude-pair-connect)
+    (let ((pid (claude-pair-test--pid)))
+      (claude-pair-disconnect)
+      (should (equal (claude-pair-rpc--daemon-pids claude-pair-socket-path) (list pid)))
+      (cl-letf (((symbol-function 'claude-pair-rpc--raw-shutdown) (lambda (_path) nil)))
+        (let ((claude-pair-rpc-protocol-version "9.0.0"))
+          (should (claude-pair-rpc-shutdown-daemon))))
+      (should-not (file-exists-p claude-pair-socket-path))
+      (should (claude-pair-test--wait-for (lambda () (not (process-attributes pid))) 5)))))
+
+(ert-deftest claude-pair-rpc-an-incompatible-daemon-can-be-restarted ()
+  (claude-pair-test-with-daemon-dir
+    (claude-pair-connect)
+    (let ((old-pid (claude-pair-test--pid))
+          (calls 0)
+          (real (symbol-function 'claude-pair-rpc--initialize)))
+      (claude-pair-disconnect)
+      ;; The first handshake meets "another version"; after the restart the
+      ;; new daemon speaks ours.
+      (cl-letf (((symbol-function 'claude-pair-rpc--initialize)
+                 (lambda (connection)
+                   (setq calls (1+ calls))
+                   (let ((claude-pair-rpc-protocol-version
+                          (if (= calls 1) "9.0.0" claude-pair-rpc-protocol-version)))
+                     (funcall real connection))))
+                ((symbol-function 'y-or-n-p) (lambda (&rest _) t)))
+        (let ((noninteractive nil))
+          (claude-pair-connect)))
+      (should (claude-pair-rpc-live-p))
+      (should-not (eql (claude-pair-test--pid) old-pid)))))
+
+(ert-deftest claude-pair-rpc-declining-the-restart-keeps-the-old-daemon ()
+  (claude-pair-test-with-daemon-dir
+    (claude-pair-connect)
+    (claude-pair-disconnect)
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) nil)))
+      (let ((noninteractive nil)
+            (claude-pair-rpc-protocol-version "9.0.0"))
+        (should-error (claude-pair-connect) :type 'claude-pair-rpc-incompatible)))
+    (should (file-exists-p claude-pair-socket-path))))
+
 (ert-deftest claude-pair-rpc-missing-daemon-command-is-a-clear-error ()
   (claude-pair-test-with-daemon-dir
     (let* ((claude-pair-daemon-command '("/nonexistent/claude-paird"))

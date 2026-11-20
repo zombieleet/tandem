@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.3.0**. This document is the contract between the Emacs client
+Version **0.4.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -53,7 +53,9 @@ request the receiver is still working on.
    daemon with `claude-paird --detach --socket <path>`, which returns once the
    socket accepts connections.
 2. The client sends `initialize`. Every other request before a successful
-   `initialize` fails with `-32002`.
+   `initialize` fails with `-32002`, except `shutdown`, so a client can stop a
+   daemon whose protocol it does not speak (from 0.4; older daemons need
+   SIGTERM, which they handle like `shutdown`).
 3. The connection stays open for as long as the client wants it.
 4. With no clients connected and no turn running, the daemon exits after its
    idle timeout (default 600 seconds, `--idle-timeout`, `0` disables it).
@@ -83,7 +85,7 @@ Result:
 
 Versions are compatible when the major numbers match and, while the major
 number is `0`, the minor numbers match too. Otherwise the daemon answers
-`-32001` with `data: {daemonProtocolVersion, daemonVersion}`.
+`-32001` with `data: {daemonProtocolVersion, daemonVersion, pid}`.
 
 ### `daemon/status` (client → daemon)
 
@@ -128,8 +130,14 @@ claude -p --input-format stream-json --output-format stream-json --verbose
            "command":"<claude-paird>","args":["mcp","--socket",S,"--session",ID],
            "timeout":86400000}}}'
        --permission-prompt-tool mcp__emacs__permission
+       --allowedTools mcp__emacs__edit_file,mcp__emacs__write_file
+       --append-system-prompt "<how files change in claude-pair>"
        [--model M] (--session-id ID | --resume ID)
 ```
+
+`<claude-paird>` is `/proc/<daemon pid>/exe` on Linux, so a helper is always
+the daemon's own binary even after an upgrade replaced the file, and the
+executable's path elsewhere.
 
 The first start uses `--session-id`; every later start uses `--resume`. The
 built-in writing tools are off, because Emacs will own every write. The
@@ -161,6 +169,7 @@ Params: `{sessionId, update}`. `update.kind` is one of:
 | `result` | `subtype`, `isError`, `cancelled`, `message`, `durationMs`, `numTurns`, `costUsd`, `sessionCostUsd`, `usage`, `permissionDenials` | The turn ended; `costUsd` is this turn's cost |
 | `error` | `message`, `stderr`, `exitCode` | `claude` stopped unexpectedly |
 | `permission` | `requestId`, `state`, and the fields below | A permission question (see below) |
+| `edit` | `requestId`, `state`, and the fields below | A proposed edit (see below) |
 
 Every turn ends with a `result` (or an `error`) followed by `status` `idle`.
 Events from subagents are left out; the subagent's own tool call shows instead.
@@ -202,10 +211,43 @@ command, the WebFetch domain (`WebFetch(domain:example.com)`), or else the
 whole tool. Claude Code itself still asks again for Bash commands with
 output redirection such as `>>`, whatever the rules say.
 
+## Edits
+
+Claude Code's built-in Edit, Write and NotebookEdit are off. Claude edits
+through the helper's `edit_file` and `write_file` tools instead, which take
+the same inputs as the built-in Edit (`file_path`, `old_string`,
+`new_string`, `replace_all`) and Write (`file_path`, `content`). They are in
+`--allowedTools`, so Claude Code asks no permission question for them: the
+review itself is the question, and no permission rule can skip it.
+
+1. The helper sends `helper/edit` `{sessionId, kind: "edit" | "write",
+   filePath, oldString, newString, replaceAll, content}` and waits.
+2. The daemon refuses, as an error result Claude reads, a path that is not
+   absolute or not inside the session's directory (symbolic links are
+   resolved), and an edit whose old and new strings are the same.
+3. The daemon sends the notification `edit/propose` `{requestId, sessionId,
+   kind, filePath, oldString, newString, replaceAll, content}` to the client
+   that answers for the session (as for permission questions), and followers
+   get `session/update` `kind: "edit"`, `state: "pending"`, `requestId`,
+   `editKind`, `filePath`, `relPath`, `title`.
+4. The client checks the edit against the file's live buffer, shows it, and
+   answers with `edit/answer` `{requestId, outcome: "applied" | "rejected" |
+   "error", message, saved, created}`. Only the client the edit was proposed
+   to may answer; others get `-32006`. The client's error messages follow the
+   built-in Edit tool's: `String to replace not found in file.`, `Found N
+   matches of the string to replace, but replace_all is false. …`.
+5. Followers get `state` equal to the outcome, with `message`, `saved` and
+   `created`. Claude gets the outcome as the tool's result: an error result
+   for a rejection, with the user's note, or for an error.
+6. A cancelled turn, a closed session, a stopping daemon or a departed helper
+   withdraws the edit: the reviewing client gets `edit/withdraw` `{requestId,
+   reason}` and followers get `state: "withdrawn"`.
+
 ### `shutdown` (client → daemon)
 
 No params. Result `{ok: true}`. After sending the result the daemon closes
-every connection, removes its socket and exits.
+every connection, removes its socket and exits. Accepted before
+`initialize`.
 
 ## Error codes
 

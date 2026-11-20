@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/url"
 
+	"github.com/victory/claude-pair/daemon/internal/mcphelper"
 	"github.com/victory/claude-pair/daemon/internal/protocol"
 	"github.com/victory/claude-pair/daemon/internal/rpc"
 	"github.com/victory/claude-pair/daemon/internal/session"
@@ -48,6 +49,10 @@ func (d *Daemon) askPermission(ctx context.Context, c *client, params json.RawMe
 	if len(p.Input) == 0 || string(p.Input) == "null" {
 		p.Input = json.RawMessage("{}")
 	}
+	if p.ToolName == mcphelper.EditToolName || p.ToolName == mcphelper.WriteToolName {
+		// The edit tools ask the user themselves, inside Emacs.
+		return allow(p.Input, Rule{}, false), nil
+	}
 	var input map[string]any
 	_ = json.Unmarshal(p.Input, &input)
 
@@ -63,7 +68,7 @@ func (d *Daemon) askPermission(ctx context.Context, c *client, params json.RawMe
 	}
 
 	req := &pendingPermission{
-		id:        newRequestID(),
+		id:        newRequestID("perm-"),
 		sessionID: p.SessionID,
 		answer:    make(chan permissionAnswer, 1),
 		withdraw:  make(chan string, 1),
@@ -140,11 +145,19 @@ func (d *Daemon) answerPermission(c *client, params json.RawMessage) (any, error
 	}
 }
 
-// withdrawPermissions cancels every open request of a session.
+// withdrawPermissions cancels every open question and edit of a session.
 func (d *Daemon) withdrawPermissions(sessionID, reason string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for _, req := range d.permissions {
+		if req.sessionID == sessionID {
+			select {
+			case req.withdraw <- reason:
+			default:
+			}
+		}
+	}
+	for _, req := range d.edits {
 		if req.sessionID == sessionID {
 			select {
 			case req.withdraw <- reason:
@@ -225,8 +238,8 @@ func deny(message string) json.RawMessage {
 	return b
 }
 
-func newRequestID() string {
+func newRequestID(prefix string) string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
-	return "perm-" + hex.EncodeToString(b[:])
+	return prefix + hex.EncodeToString(b[:])
 }

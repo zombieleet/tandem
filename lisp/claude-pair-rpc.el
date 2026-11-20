@@ -37,6 +37,7 @@
 
 (require 'cl-lib)
 (require 'jsonrpc)
+(require 'seq)
 (require 'subr-x)
 
 (defgroup claude-pair nil
@@ -47,7 +48,7 @@
 (defconst claude-pair-version "0.1.0"
   "Version of the claude-pair Emacs package.")
 
-(defvar claude-pair-rpc-protocol-version "0.3.0"
+(defvar claude-pair-rpc-protocol-version "0.4.0"
   "Protocol version this client speaks.  See protocol/PROTOCOL.md.")
 
 (defcustom claude-pair-daemon-command nil
@@ -93,6 +94,9 @@ Each function receives the method (a symbol) and the params (a plist).")
 
 (defvar claude-pair-rpc--expected-disconnect nil
   "Non-nil while Emacs closes the connection on purpose.")
+
+(define-error 'claude-pair-rpc-incompatible
+  "The running claude-paird speaks another protocol version" 'user-error)
 
 (defconst claude-pair-rpc--directory
   (file-name-directory (or load-file-name buffer-file-name default-directory))
@@ -212,10 +216,12 @@ Close CONNECTION and signal a `user-error' when the daemon refuses."
             (message (alist-get 'jsonrpc-error-message data))
             (extra (alist-get 'jsonrpc-error-data data)))
        (if (eql code -32001)
-           (user-error "This claude-pair speaks protocol %s, the running daemon speaks %s; \
-run M-x claude-pair-stop-daemon and connect again"
-                       claude-pair-rpc-protocol-version
-                       (or (plist-get extra :daemonProtocolVersion) "another version"))
+           (signal 'claude-pair-rpc-incompatible
+                   (list (format "This claude-pair speaks protocol %s, but the running claude-paird \
+speaks %s.  Run M-x claude-pair-stop-daemon to stop it, then try again"
+                                 claude-pair-rpc-protocol-version
+                                 (or (plist-get extra :daemonProtocolVersion) "another version"))
+                         (plist-get extra :daemonProtocolVersion)))
          (user-error "The claude-pair daemon refused to initialize: %s"
                      (or message "no reason given")))))))
 
@@ -227,10 +233,27 @@ run M-x claude-pair-stop-daemon and connect again"
 (defun claude-pair-rpc-connection (&optional no-start)
   "Return a live, initialized connection to the daemon.
 Start the daemon when nothing answers on the socket, unless NO-START
-is non-nil, in which case return nil."
+is non-nil, in which case return nil.  When the running daemon speaks
+another protocol version, offer to restart it."
   (if (claude-pair-rpc-live-p)
       claude-pair-rpc--connection
-    (let* ((path (claude-pair-rpc-socket-path))
+    (condition-case err
+        (claude-pair-rpc--connect no-start)
+      (claude-pair-rpc-incompatible
+       (if (and (not no-start)
+                (not noninteractive)
+                (y-or-n-p (format "The running claude-paird speaks protocol %s, this \
+claude-pair needs %s; restart it, ending its sessions? "
+                                  (or (nth 2 err) "another version")
+                                  claude-pair-rpc-protocol-version)))
+           (progn
+             (claude-pair-rpc-stop-without-handshake)
+             (claude-pair-rpc--connect nil))
+         (signal (car err) (cdr err)))))))
+
+(defun claude-pair-rpc--connect (no-start)
+  "Connect to the daemon, starting it unless NO-START, and initialize."
+  (let* ((path (claude-pair-rpc-socket-path))
            (process (or (claude-pair-rpc--open-process path)
                         (unless no-start
                           (claude-pair-rpc--start-daemon path)
@@ -240,7 +263,7 @@ is non-nil, in which case return nil."
       (when process
         (let ((connection (claude-pair-rpc--make-connection process)))
           (setq claude-pair-rpc--server-info (claude-pair-rpc--initialize connection))
-          (setq claude-pair-rpc--connection connection))))))
+          (setq claude-pair-rpc--connection connection)))))
 
 (defun claude-pair-rpc-server-info ()
   "Return the daemon's initialize result as a plist, or nil."
@@ -275,7 +298,61 @@ Wait at most TIMEOUT seconds, 10 by default."
 
 (defun claude-pair-rpc-shutdown-daemon (&optional timeout)
   "Ask the daemon to exit and wait up to TIMEOUT seconds for it to go.
-Return non-nil if a daemon was running."
+Return non-nil if a daemon was running.  A daemon that speaks another
+protocol version is stopped too."
+  (condition-case nil
+      (claude-pair-rpc--shutdown-daemon timeout)
+    (claude-pair-rpc-incompatible
+     (claude-pair-rpc-stop-without-handshake timeout))))
+
+(defun claude-pair-rpc--raw-shutdown (path)
+  "Send shutdown to the daemon on PATH without initializing.
+Return non-nil if it accepted.  Daemons before protocol 0.4 refuse."
+  (when-let* ((process (claude-pair-rpc--open-process path)))
+    (let ((connection (claude-pair-rpc--make-connection process))
+          (claude-pair-rpc--expected-disconnect t))
+      (unwind-protect
+          (condition-case nil
+              (progn (jsonrpc-request connection 'shutdown nil :timeout 3) t)
+            (jsonrpc-error nil))
+        (claude-pair-rpc--close connection)))))
+
+(defun claude-pair-rpc--daemon-pids (path)
+  "Return the ids of your claude-paird processes listening on PATH."
+  (let ((pattern (concat "--socket " (regexp-quote path) "\\( \\|\\'\\)")))
+    (seq-filter
+     (lambda (pid)
+       (let* ((attrs (process-attributes pid))
+              (args (alist-get 'args attrs)))
+         (and args
+              (eql (alist-get 'euid attrs) (user-uid))
+              (string-match-p "claude-paird" args)
+              (not (string-match-p "claude-paird mcp " args))
+              (string-match-p pattern args))))
+     (list-system-processes))))
+
+(defun claude-pair-rpc-stop-without-handshake (&optional timeout)
+  "Stop the daemon on the socket whatever protocol it speaks.
+Ask it to shut down; a daemon too old to accept that before the
+handshake gets SIGTERM, which it handles like shutdown.  Wait up to
+TIMEOUT seconds, 5 by default, and return non-nil if one was stopped."
+  (let ((path (claude-pair-rpc-socket-path))
+        (deadline (+ (float-time) (or timeout 5))))
+    (claude-pair-rpc-disconnect)
+    (unless (claude-pair-rpc--raw-shutdown path)
+      (let ((pids (claude-pair-rpc--daemon-pids path)))
+        (unless pids
+          (user-error "Cannot find the process behind %s; stop it yourself" path))
+        (dolist (pid pids)
+          (signal-process pid 'SIGTERM))))
+    (while (and (file-exists-p path) (< (float-time) deadline))
+      (accept-process-output nil 0.05))
+    (when (file-exists-p path)
+      (user-error "The old claude-paird did not stop; stop it yourself, then try again"))
+    t))
+
+(defun claude-pair-rpc--shutdown-daemon (timeout)
+  "Shut down a daemon this client can talk to, waiting up to TIMEOUT seconds."
   (when-let* ((connection (claude-pair-rpc-connection t)))
     (let ((claude-pair-rpc--expected-disconnect t)
           (deadline (+ (float-time) (or timeout 3))))

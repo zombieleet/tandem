@@ -23,8 +23,32 @@ const (
 	PermissionTool = "permission"
 )
 
-// PermissionToolName is the name Claude Code knows the permission tool by.
-const PermissionToolName = "mcp__" + ServerName + "__" + PermissionTool
+// Full names, as Claude Code knows the tools.
+const (
+	PermissionToolName = "mcp__" + ServerName + "__" + PermissionTool
+	EditToolName       = "mcp__" + ServerName + "__edit_file"
+	WriteToolName      = "mcp__" + ServerName + "__write_file"
+)
+
+// EditArgs are edit_file's inputs, the same as Claude Code's built-in Edit.
+type EditArgs struct {
+	FilePath   string `json:"file_path" jsonschema:"The absolute path to the file to modify"`
+	OldString  string `json:"old_string" jsonschema:"The text to replace"`
+	NewString  string `json:"new_string" jsonschema:"The text to replace it with (must be different from old_string)"`
+	ReplaceAll bool   `json:"replace_all,omitempty" jsonschema:"Replace all occurrences of old_string (default false)"`
+}
+
+// WriteArgs are write_file's inputs, the same as Claude Code's built-in Write.
+type WriteArgs struct {
+	FilePath string `json:"file_path" jsonschema:"The absolute path to the file to write (must be absolute, not relative)"`
+	Content  string `json:"content" jsonschema:"The content to write to the file"`
+}
+
+// editResult is the daemon's answer to helper/edit.
+type editResult struct {
+	Text    string `json:"text"`
+	IsError bool   `json:"isError"`
+}
 
 // Run serves MCP on stdin and stdout for the session sessionID until Claude
 // Code closes stdin.
@@ -68,6 +92,36 @@ func Run(ctx context.Context, socketPath, sessionID string, log *slog.Logger) er
 		}
 		// Claude Code reads exactly one text block holding the decision.
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(answer)}}}, nil, nil
+	})
+	relay := func(ctx context.Context, params map[string]any) (*mcp.CallToolResult, any, error) {
+		params["sessionId"] = sessionID
+		raw, err := conn.Call(ctx, "helper/edit", params)
+		var r editResult
+		if err == nil {
+			err = json.Unmarshal(raw, &r)
+		}
+		if err != nil {
+			r = editResult{Text: "The edit was not made: claude-pair could not reach Emacs (" + err.Error() + ").", IsError: true}
+		}
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: r.Text}}, IsError: r.IsError}, nil, nil
+	}
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "edit_file",
+		Description: "Performs an exact string replacement in a file, through Emacs. old_string must match the " +
+			"file's current text exactly, including whitespace and indentation, and must be unique unless " +
+			"replace_all is true. The user sees the change in Emacs and applies or rejects it; a rejection " +
+			"comes back as an error with the user's note. Use this instead of the built-in Edit tool.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, a EditArgs) (*mcp.CallToolResult, any, error) {
+		return relay(ctx, map[string]any{"kind": "edit", "filePath": a.FilePath,
+			"oldString": a.OldString, "newString": a.NewString, "replaceAll": a.ReplaceAll})
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "write_file",
+		Description: "Creates a file, or replaces a file's whole content, through Emacs. The user sees the " +
+			"change in Emacs and applies or rejects it. Prefer edit_file for changes to existing files. " +
+			"Use this instead of the built-in Write tool.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, a WriteArgs) (*mcp.CallToolResult, any, error) {
+		return relay(ctx, map[string]any{"kind": "write", "filePath": a.FilePath, "content": a.Content})
 	})
 	return server.Run(ctx, &mcp.StdioTransport{})
 }

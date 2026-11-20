@@ -166,13 +166,6 @@
 
 ;;;; Through the daemon, its MCP helper and the fake claude
 
-(defun claude-pair-test--send (buffer text)
-  "Type TEXT into BUFFER's composer and send it, without waiting."
-  (with-current-buffer buffer
-    (goto-char (point-max))
-    (insert text)
-    (claude-pair-chat-send)))
-
 (defun claude-pair-test--wait-question (buffer)
   "Wait until BUFFER shows a permission question, and return its id."
   (should (claude-pair-test--wait-for

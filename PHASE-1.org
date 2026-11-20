@@ -26,6 +26,15 @@ How testing works on every item:
   (=claude-paird mcp=) that relays to the daemon's private socket.
 - 19 Nov 2026 :: Cancel sends SIGINT to =claude=; the next prompt
   resumes the session with =--resume=.
+- 20 Nov 2026 :: The edit review happens inside the edit tool, not in the
+  permission prompt. A live check showed an MCP call can wait for the user
+  (10½ minutes with default settings; the daemon sets a 24-hour per-server
+  limit), so this is safe, and it means no permission rule can skip the
+  review. The edit tools are in =--allowedTools=, so there is no second
+  question before the review.
+- 20 Nov 2026 :: On Linux, Claude Code starts the MCP helper as
+  =/proc/<daemon pid>/exe=, so a helper always matches the daemon even
+  after a rebuild or an upgrade replaced the binary.
 
 * DONE Live checks before choosing Go [3/3]
 Run 19 Nov 2026 on Claude Code 2.1.327 with your login.
@@ -256,35 +265,103 @@ Then =M-x claude-pair= in a scratch project.
   =M-x claude-pair= … the chat pops back when Claude asks; typing in
   your other buffer never answers the question
 
-* DOING M4 · Edits with whole-edit review [0/9]
+* DONE M4 · Edits with whole-edit review [9/9]
 Phase 1 approves or rejects an edit as a whole. Per-hunk review is Phase 2.
-- [ ] MCP tools =edit_file= and =write_file= in the helper, with the
+- [X] MCP tools =edit_file= and =write_file= in the helper, with the
   same inputs as the built-in Edit and Write; built-in Edit, Write and
-  NotebookEdit turned off with =--disallowedTools=
-- [ ] Review in the permission tool: =buffer/snapshot= → validate →
-  =review/propose= → allow with =updatedInput=, or deny with your note;
-  decisions kept by =tool_use_id= for the tool result
-- [ ] The daemon passes its own =--settings= and =--setting-sources=, so
-  no allow rule can skip review of the edit tools
-- [ ] The edit tool commits in Emacs with a second tick check
-- [ ] Error messages match the built-in Edit tool (not found, several matches)
-- [ ] Emacs shows the proposal in the real buffer: added text tinted,
-  removed text struck through; =C-c C-a= applies, =C-c C-k= rejects
-  with a reason
-- [ ] An applied edit is one undo step
-- [ ] Autosave only when the buffer had no unsaved changes of yours
-- [ ] =write_file= creates new files
+  NotebookEdit stay off; Claude is told about them through
+  =--append-system-prompt=
+- [X] Review inside the edit tool (see Decisions): =helper/edit= →
+  =edit/propose= to Emacs → the user decides → =edit/answer= → Claude
+  reads the outcome as the tool result, with the user's note on a
+  rejection
+- [X] No allow rule can skip the review, because the review is the tool
+- [X] The daemon refuses paths outside the project (symbolic links
+  resolved) and identical old and new strings; Emacs checks again at
+  apply time that the text under the proposal is unchanged
+- [X] Error messages match the built-in Edit tool (not found, several
+  matches, file already exists, nothing to change)
+- [X] Emacs shows the proposal in the real buffer without changing its
+  text: removed text struck through, added text tinted, a banner line,
+  the old text read-only; =C-c C-a= applies, =C-c C-k= rejects with an
+  optional reason; =y= / =n= / =d= / =RET= on the chat's block
+- [X] An applied edit is one undo step
+- [X] Autosave only when the buffer had no unsaved changes of yours,
+  including changes you make while reviewing
+- [X] =write_file= creates new files (and their directories), and shows a
+  rewrite of an existing file as only its changed lines
 ** Auto
-- [ ] Daemon: validation errors, allow and deny mapping, conflict path,
-  an allow rule in settings does not skip review
-- [ ] ERT: proposal overlays, apply keeps the text, reject restores the
-  exact original, tick conflict, single undo step, autosave rule
-** Visual gate (live)
-- [ ] Ask Claude to change a function: the proposal appears in the buffer
-- [ ] Apply: the file is saved, =C-/= undoes the whole edit at once
-- [ ] Reject with a reason: Claude responds to the reason
-- [ ] Edit a file with unsaved changes of yours: nothing of yours is
-  saved behind your back
+- [X] Go: proposal and apply, every outcome as Claude reads it, write
+  creates a file, paths outside the project (absolute, =..=, through a
+  symbolic link) never proposed, identical strings refused, cancel
+  withdraws, only the reviewing Emacs may answer, path rules, the edit
+  tools ask no permission question, helper is the daemon's own binary
+- [X] ERT without a daemon: the buffer's text is untouched while
+  proposed, the proposed text is locked inside but you can type around
+  it, apply saves and is one undo step (also with =replace_all=), reject,
+  every built-in error message, your unsaved changes are never saved
+  (also when you type during review), text changed underneath is not
+  applied, a read-only buffer is reported, a failure while applying is
+  reported, new files, a rewrite shows only changed lines, a stale buffer
+  follows the disk first, withdraw, killing the buffer rejects,
+  file-local =eval= never runs, the chat's block and every outcome, an
+  edit shows once in the chat
+- [X] ERT through the daemon, the helper and the fake =claude=: apply,
+  reject with a note, a bad edit, cancel
+- [X] Bugs found and fixed while building: applying a new file in a
+  missing directory failed because Emacs opened it read-only, and the
+  failure left Claude waiting forever (now new files open writable and
+  every failure is reported); the lock let you type between two locked
+  characters; edits showed twice in the chat; rebuilding the daemon would
+  have broken permission prompts for a daemon already running
+- [X] Found by you: with a daemon of the previous protocol still running,
+  the error said "run M-x claude-pair-stop-daemon", but stopping also
+  needed the handshake, so it failed too. Now =shutdown= works before the
+  handshake, a daemon too old for that gets SIGTERM (found by its socket
+  in the process list), and =M-x claude-pair= offers to restart an
+  incompatible daemon. Checked against the real M3 daemon built from its
+  commit
+- [X] Found by you: the proposed new text could not be scrolled through or
+  read, because it was an overlay string. It is now real, read-only text,
+  fontified by the mode, that is not an undo step and does not mark the
+  buffer modified. Saving takes it out first, so only your text is
+  written and your save hooks see only your text (an earlier "refuse to
+  save" attempt failed: Emacs ignores errors from =before-save-hook=). A
+  revert drops the proposal; overlapping proposals are refused; the hooks
+  survive a major-mode change
+- Result on 20 Nov 2026: =make check= passes: all Go packages with the
+  race detector, 89 ERT tests, 0 checkdoc warnings
+** Live checks run by Claude (20 Nov 2026, your login, about $0.32)
+- [X] Claude found and used =mcp__emacs__edit_file= and
+  =mcp__emacs__write_file= on its own
+- [X] Apply: =hello world= became =goodbye world=, saved
+- [X] Reject with a note: Claude followed the note ("keep goodbye, add a
+  farewell line") with a second edit, which was applied
+- [X] With unsaved changes of yours: applied in the buffer, not saved, the
+  file on disk unchanged, and Claude explained exactly that
+- [X] =write_file= created =docs/todo.md= with its content
+- [X] Cancel while reviewing: withdrawn, file unchanged, nothing left in
+  the buffer
+** Visual gate (passed 20 Nov 2026)
+: make daemon
+: emacs -Q -L ~/personal-projects/claude-pair/lisp --eval "(require 'claude-pair)"
+: M-x claude-pair-stop-daemon
+Then =M-x claude-pair= in a scratch project.
+- [X] Ask Claude to change a function: the proposal appears in the file's
+  buffer, struck-through old text and tinted new text, with the banner
+- [X] Scroll and move point through a long proposal: the new code is real
+  lines, highlighted by the buffer's mode
+- [X] =C-x C-s= while a proposal is shown: only your text is saved (check
+  with =M-x diff-buffer-with-file= or =cat=), the proposal stays
+- [X] Try typing inside the struck-through text: Emacs refuses, with a
+  message; typing elsewhere in the buffer works
+- [X] =C-c C-a= on the proposal: the file is saved, =C-/= undoes the
+  whole edit at once
+- [X] Reject with a reason (=C-c C-k=, or =d= in the chat): Claude
+  responds to the reason
+- [X] Make an unsaved change in a file, then let Claude edit it: the edit
+  applies but nothing is saved behind your back
+- [X] Ask for a new file: it is created where Claude said
 
 * TODO M5 · Layout manager [0/6]
 - [ ] Claude tab; chat side window survives =C-x 1=

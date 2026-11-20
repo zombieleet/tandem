@@ -6,10 +6,10 @@ in its headless stream-json mode. Emacs is the client: a chat buffer, Claude's
 edits reviewed in your real buffers, and windows Claude opens for you within
 limits you set.
 
-**Status:** phase 1, milestone 3. You can chat with Claude about a project,
-watch its tool calls, stop an answer, and allow or deny each command Claude
-wants to run. Claude's built-in file editing stays off until Emacs-owned
-edits arrive in milestone 4. See [PHASE-1.org](PHASE-1.org).
+**Status:** phase 1, milestone 4. You can chat with Claude about a project,
+watch its tool calls, stop an answer, allow or deny each command, and review
+every edit Claude proposes in the file's own buffer before it happens. See
+[PHASE-1.org](PHASE-1.org).
 
 ## Requirements
 
@@ -61,6 +61,37 @@ In the chat buffer, type after the `❯` prompt:
 
 The header line shows the model, what Claude is doing, and the session's cost
 so far. Each tool call is one line: `▸` while it runs, `✓` or `✗` when done.
+
+## Reviewing edits
+
+Claude never writes your files behind your back. Each edit appears in the
+file's buffer as a proposal, with a line above it: the text to go struck
+through, and the new text below it as real lines you can scroll through,
+move around in and read, highlighted by the buffer's mode. Both are
+read-only until you decide. The new text is for display only: it is not an
+undo step, it does not mark the buffer modified, and saving (`C-x C-s`)
+writes only your text, with the proposal taken out while your save hooks
+and formatters run:
+
+| Key | What it does |
+|---|---|
+| `C-c C-a` | Apply the edit, with point on the proposal (one undo step) |
+| `C-c C-k` | Reject it; you can tell Claude why |
+
+The chat shows the same proposal as a block, where `y` applies it, `n`
+rejects it, `d` rejects it with a note and `RET` shows it. `M-x
+claude-pair-review-apply` and `M-x claude-pair-review-reject` work from
+anywhere.
+
+An applied edit is saved when the buffer had no unsaved changes of yours
+(`claude-pair-review-autosave`). Otherwise it stays unsaved, and Claude is
+told that commands reading the file from disk still see the old version.
+Edits are checked against the live buffer, unsaved changes included, with
+the same rules as Claude Code's own Edit tool. Files are opened with unsafe
+local variables ignored, and only files inside the project can be edited.
+If the file is reloaded from disk while a proposal is shown (`revert-buffer`,
+auto-revert), the proposal is dropped and Claude is told to read the file
+again.
 
 ## Permission questions
 

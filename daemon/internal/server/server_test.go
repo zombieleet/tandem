@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -208,7 +209,7 @@ func TestIncompatibleProtocol(t *testing.T) {
 		if !strings.Contains(m.Error.Message, v) || !strings.Contains(m.Error.Message, protocol.Version) {
 			t.Fatalf("message %q should name both versions", m.Error.Message)
 		}
-		want := fmt.Sprintf(`{"daemonProtocolVersion":%q,"daemonVersion":"9.9.9-test"}`, protocol.Version)
+		want := fmt.Sprintf(`{"daemonProtocolVersion":%q,"daemonVersion":"9.9.9-test","pid":%d}`, protocol.Version, os.Getpid())
 		if string(m.Error.Data) != want {
 			t.Fatalf("data %s, want %s", m.Error.Data, want)
 		}
@@ -414,4 +415,30 @@ func TestShutdown(t *testing.T) {
 	if d.StopReason() != "shutdown request" {
 		t.Fatalf("reason %q", d.StopReason())
 	}
+}
+
+func TestTheHelperIsThisDaemonsOwnBinary(t *testing.T) {
+	path := defaultHelperPath()
+	if runtime.GOOS == "linux" {
+		if path != fmt.Sprintf("/proc/%d/exe", os.Getpid()) {
+			t.Fatalf("helper path %q", path)
+		}
+		target, err := os.Readlink(path)
+		exe, _ := os.Executable()
+		if err != nil || target != exe {
+			t.Fatalf("%s points at %q (%v), want %q", path, target, err, exe)
+		}
+		return
+	}
+	if exe, _ := os.Executable(); path != exe {
+		t.Fatalf("helper path %q, want %q", path, exe)
+	}
+}
+
+func TestShutdownWorksBeforeInitialize(t *testing.T) {
+	d := startDaemon(t, 0, "cpd-")
+	c := connect(t, d.opts.SocketPath)
+	m := c.request("shutdown", nil)
+	wantOK(t, m)
+	waitFor(t, "the daemon to stop", func() bool { return !exists(d.opts.SocketPath) })
 }

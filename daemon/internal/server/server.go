@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -76,6 +77,7 @@ type Daemon struct {
 	clients     map[int]*client
 	sessions    map[string]*sessionEntry
 	permissions map[string]*pendingPermission
+	edits       map[string]*pendingEdit
 	nextClient  int
 	idle        *time.Timer
 	stopping    bool
@@ -91,13 +93,14 @@ func New(opts Options) *Daemon {
 		opts.Log = slog.New(slog.DiscardHandler)
 	}
 	if opts.HelperPath == "" {
-		opts.HelperPath, _ = os.Executable()
+		opts.HelperPath = defaultHelperPath()
 	}
 	return &Daemon{
 		opts:        opts,
 		clients:     map[int]*client{},
 		sessions:    map[string]*sessionEntry{},
 		permissions: map[string]*pendingPermission{},
+		edits:       map[string]*pendingEdit{},
 		done:        make(chan struct{}),
 	}
 }
@@ -272,8 +275,16 @@ func (d *Daemon) accept(nc *net.UnixConn) {
 }
 
 func (d *Daemon) handle(ctx context.Context, c *client, method string, params json.RawMessage) (any, error) {
-	if method == "initialize" {
+	switch method {
+	case "initialize":
 		return d.initialize(c, params)
+	case "shutdown":
+		// Allowed before initialize, so a client of any version can stop a
+		// daemon whose protocol it does not speak.
+		return rpc.Then{
+			Result: map[string]bool{"ok": true},
+			After:  func() { go d.Stop("shutdown request") },
+		}, nil
 	}
 	if !c.initialized.Load() {
 		return nil, rpc.Errorf(protocol.NotInitialized, "send initialize before %s", method)
@@ -310,11 +321,10 @@ func (d *Daemon) handle(ctx context.Context, c *client, method string, params js
 		return d.askPermission(ctx, c, params)
 	case "permission/answer":
 		return d.answerPermission(c, params)
-	case "shutdown":
-		return rpc.Then{
-			Result: map[string]bool{"ok": true},
-			After:  func() { go d.Stop("shutdown request") },
-		}, nil
+	case "helper/edit":
+		return d.proposeEdit(ctx, c, params)
+	case "edit/answer":
+		return d.answerEdit(c, params)
 	default:
 		return nil, rpc.Errorf(protocol.MethodNotFound, "unknown method %s", method)
 	}
@@ -330,7 +340,8 @@ func (d *Daemon) initialize(c *client, params json.RawMessage) (any, error) {
 			Code: protocol.IncompatibleProtocol,
 			Message: fmt.Sprintf("client protocol %s is not compatible with daemon protocol %s",
 				*p.ProtocolVersion, protocol.Version),
-			Data: map[string]string{"daemonProtocolVersion": protocol.Version, "daemonVersion": d.opts.Version},
+			Data: map[string]any{"daemonProtocolVersion": protocol.Version, "daemonVersion": d.opts.Version,
+				"pid": os.Getpid()},
 		}
 	}
 	c.initialized.Store(true)
@@ -460,6 +471,21 @@ func newSessionID() string {
 	b[6] = b[6]&0x0f | 0x40 // version 4
 	b[8] = b[8]&0x3f | 0x80 // RFC 4122 variant
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// defaultHelperPath is the executable Claude Code runs as "claude-paird mcp".
+// On Linux it is /proc/PID/exe, which stays this daemon's own binary even
+// after an upgrade or a rebuild replaces the file, so a helper always speaks
+// the daemon's protocol. Elsewhere it is the executable's path.
+func defaultHelperPath() string {
+	if runtime.GOOS == "linux" {
+		self := fmt.Sprintf("/proc/%d/exe", os.Getpid())
+		if _, err := os.Stat(self); err == nil {
+			return self
+		}
+	}
+	exe, _ := os.Executable()
+	return exe
 }
 
 // emacsClientsLocked counts connected clients other than MCP helpers.

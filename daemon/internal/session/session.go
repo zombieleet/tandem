@@ -46,6 +46,14 @@ var (
 	ErrClosed = errors.New("the session is closed")
 )
 
+// EditingPrompt tells Claude how files change in claude-pair.
+const EditingPrompt = "You are running inside claude-pair, which connects you to the user's Emacs. " +
+	"Change files only with " + mcphelper.EditToolName + " and create or overwrite them only with " +
+	mcphelper.WriteToolName + "; the built-in Edit, Write and NotebookEdit tools are turned off. " +
+	"The user reviews every edit in Emacs, where the file may have unsaved changes, so old_string must " +
+	"match what you last read. If the user rejects an edit, read their note and adjust instead of " +
+	"sending the same change again. Use absolute paths inside the project."
+
 // helperTimeoutMs is how long one MCP call may take: 24 hours.
 const helperTimeoutMs = 24 * 60 * 60 * 1000
 
@@ -224,7 +232,11 @@ func (s *Session) Args(resume bool) []string {
 			},
 		}})
 		args = append(args, "--mcp-config", string(config),
-			"--permission-prompt-tool", mcphelper.PermissionToolName)
+			"--permission-prompt-tool", mcphelper.PermissionToolName,
+			// The user reviews every edit in Emacs; a second question first
+			// would only be noise.
+			"--allowedTools", mcphelper.EditToolName+","+mcphelper.WriteToolName,
+			"--append-system-prompt", EditingPrompt)
 	} else {
 		args = append(args, "--permission-prompts", "none")
 	}

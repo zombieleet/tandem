@@ -4,7 +4,11 @@
 //
 // A prompt "script:NAME[:ARG]" picks a scenario: hello, args, nostream,
 // tools, slow:N, crash, fail, subagent, bash:CMD, bash2:CMD (the same
-// command twice), sleepbash:MS:CMD, webfetch:URL. Any other prompt is echoed back.
+// command twice), sleepbash:MS:CMD, webfetch:URL, and edit:JSON or
+// write:JSON, where JSON holds file (relative to the working directory),
+// old, new and all, or file and content. Edits call the emacs server's
+// edit_file or write_file over MCP, asking permission first unless
+// --allowedTools allows them. Any other prompt is echoed back.
 //
 // For bash and webfetch it asks --permission-prompt-tool through the MCP
 // server in --mcp-config, as Claude Code does, and applies "always" rules
@@ -44,6 +48,7 @@ var (
 
 	mcpConfig  string
 	permTool   string
+	allowed    = map[string]bool{}
 	mcpSession *mcp.ClientSession
 	rules      []map[string]any // allow rules from "always" answers
 
@@ -78,6 +83,10 @@ func main() {
 			mcpConfig = args[i+1]
 		case "--permission-prompt-tool":
 			permTool = args[i+1]
+		case "--allowedTools":
+			for _, t := range strings.Split(args[i+1], ",") {
+				allowed[strings.TrimSpace(t)] = true
+			}
 		}
 	}
 
@@ -159,6 +168,8 @@ func turn(prompt string, args []string) {
 		}
 	case "bash", "bash2", "webfetch":
 		permissionScenario(name, arg)
+	case "edit", "write":
+		editScenario(name, arg)
 	case "sleepbash": // sleepbash:MS:CMD waits MS milliseconds, then asks to run CMD
 		ms, cmd, _ := strings.Cut(arg, ":")
 		n, _ := strconv.Atoi(ms)
@@ -233,20 +244,17 @@ func permissionScenario(name, arg string) {
 	result("success", false, map[string]any{"permission_denials": denials})
 }
 
-// ask calls the permission prompt tool the way Claude Code does, and checks
-// the answer as strictly: exactly one text block, no structured content.
-func ask(tool string, input map[string]any, toolUseID string) (map[string]any, error) {
-	if permTool == "" {
-		return map[string]any{"behavior": "deny", "message": "no permission prompt tool"}, nil
-	}
-	server, toolName, ok := strings.Cut(strings.TrimPrefix(permTool, "mcp__"), "__")
+// callTool calls an MCP tool, given by its full mcp__server__tool name, and
+// returns its one text block. SIGINT cancels the call.
+func callTool(fullName string, args map[string]any) (string, bool, *mcp.CallToolResult, error) {
+	server, toolName, ok := strings.Cut(strings.TrimPrefix(fullName, "mcp__"), "__")
 	if !ok {
-		return nil, fmt.Errorf("bad --permission-prompt-tool %q", permTool)
+		return "", false, nil, fmt.Errorf("bad MCP tool name %q", fullName)
 	}
 	if mcpSession == nil {
 		cs, err := connect(server)
 		if err != nil {
-			return nil, err
+			return "", false, nil, err
 		}
 		mcpSession = cs
 	}
@@ -260,9 +268,28 @@ func ask(tool string, input map[string]any, toolUseID string) (map[string]any, e
 		callMu.Unlock()
 		cancel()
 	}()
-	res, err := mcpSession.CallTool(ctx, &mcp.CallToolParams{Name: toolName, Arguments: map[string]any{
+	res, err := mcpSession.CallTool(ctx, &mcp.CallToolParams{Name: toolName, Arguments: args})
+	if err != nil {
+		return "", false, nil, err
+	}
+	text := ""
+	if len(res.Content) == 1 {
+		if t, ok := res.Content[0].(*mcp.TextContent); ok {
+			text = t.Text
+		}
+	}
+	return text, res.IsError, res, nil
+}
+
+// ask calls the permission prompt tool the way Claude Code does, and checks
+// the answer as strictly: exactly one text block, no structured content.
+func ask(tool string, input map[string]any, toolUseID string) (map[string]any, error) {
+	if permTool == "" {
+		return map[string]any{"behavior": "deny", "message": "no permission prompt tool"}, nil
+	}
+	_, _, res, err := callTool(permTool, map[string]any{
 		"tool_name": tool, "input": input, "tool_use_id": toolUseID,
-	}})
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -278,6 +305,54 @@ func ask(tool string, input map[string]any, toolUseID string) (map[string]any, e
 		return nil, fmt.Errorf("Permission prompt tool returned invalid JSON: %v", err)
 	}
 	return decision, nil
+}
+
+// editScenario calls edit_file or write_file once and reports the result.
+func editScenario(name, arg string) {
+	var spec struct {
+		File, Old, New, Content string
+		All                     bool
+	}
+	if err := json.Unmarshal([]byte(arg), &spec); err != nil {
+		streamText([]string{"bad edit spec: " + err.Error()}, 0)
+		result("success", false, nil)
+		return
+	}
+	cwd, _ := os.Getwd()
+	path := spec.File
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(cwd, path)
+	}
+	tool := "mcp__emacs__edit_file"
+	input := map[string]any{"file_path": path, "old_string": spec.Old, "new_string": spec.New}
+	if spec.All {
+		input["replace_all"] = true
+	}
+	if name == "write" {
+		tool, input = "mcp__emacs__write_file", map[string]any{"file_path": path, "content": spec.Content}
+	}
+	toolID := fmt.Sprintf("toolu_e%d", turns)
+	assistant(nextMsg(), map[string]any{"type": "tool_use", "id": toolID, "name": tool, "input": input})
+	if !allowed[tool] {
+		decision, err := ask(tool, input, toolID)
+		if err != nil || decision["behavior"] != "allow" {
+			toolResult(toolID, "permission denied", true)
+			streamText([]string{"edit result: permission denied"}, 0)
+			result("success", false, nil)
+			return
+		}
+	}
+	text, isError, _, err := callTool(tool, input)
+	if interrupted.Load() {
+		interruptTurn(nextMsg(), "")
+	}
+	if err != nil {
+		text, isError = "tool call failed: "+err.Error(), true
+	}
+	logEvent("%s %s -> error=%v %s", tool, spec.File, isError, text)
+	toolResult(toolID, text, isError)
+	streamText([]string{"edit result: " + text}, 0)
+	result("success", false, nil)
 }
 
 func connect(server string) (*mcp.ClientSession, error) {

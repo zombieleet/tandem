@@ -108,5 +108,12 @@ BUFFER is bound to nil for BODY to set; it is killed afterwards."
                     (null claude-pair-chat--queue))))
            10)))
 
+(defun claude-pair-test--send (buffer text)
+  "Type TEXT into BUFFER's composer and send it, without waiting."
+  (with-current-buffer buffer
+    (goto-char (point-max))
+    (insert text)
+    (claude-pair-chat-send)))
+
 (provide 'claude-pair-test-helpers)
 ;;; claude-pair-test-helpers.el ends here
