@@ -55,17 +55,50 @@ check, and a milestone is committed before the next one starts.
   Claude reacts to the note
 - [X] =C-/= after applying a hunk undoes that hunk only
 
-* TODO M2 · The popup [0/5]
-- [ ] A small popup next to the hunk: Approve, Reject…, Ask Claude…, with
-  "Claude · hunk 2 of 5 · file"
-- [ ] Opens when point enters a hunk (after 0.3 s idle) and on mouse hover;
-  =M-RET= opens it by hand
-- [ ] GUI: a child frame that never takes focus; terminal (before Emacs
-  31): a row of buttons above the hunk
-- [ ] Mouse clicks and the keys work in both
-- [ ] Never covers the hunk itself; closes when point leaves
-** Visual gate
-- [ ] Keyboard and mouse, in a GUI Emacs and in =emacs -nw=
+* DONE M2 · The popup [5/5]
+- [X] A small popup next to the hunk: "Claude · hunk 2 of 5 · file" with
+  ✓ Approve and ✗ Reject… and their keys. (Ask Claude… joins it in M3,
+  which makes it work)
+- [X] Opens when point rests in a hunk (=claude-pair-popup-delay=, 0.3 s)
+  and on mouse hover; =M-RET= opens it at once
+- [X] GUI: a child frame that never takes focus; terminal: the hunk's
+  banner line lights up and its "apply" / "reject" parts are buttons
+  (=claude-pair-popup-style=: =auto=, =child-frame=, =inline=, nil)
+- [X] Clicks act in your window and leave focus there; the keys work as
+  before
+- [X] Below the hunk, else above its banner, never over it; closes when
+  point leaves the hunk or its buffer, or the hunk is decided
+** Auto
+- [X] ERT: banner buttons, clicks on a banner and in the popup, the
+  pause before opening, a stale timer, =M-RET=, closing on decision and on
+  leaving the buffer, hover without a tooltip, the text, placement, style
+  (12 tests); =make check= clean (136 ERT tests)
+** Interactive checks run by Claude (fake claude)
+- [X] Terminal (tmux): not lit at once; lit after the pause; off when
+  point leaves; =M-RET= lights hunk 2 at once
+- [X] GUI: a real PGTK Emacs in a headless compositor (=cage=), seen
+  through screenshots. The child frame opens under hunk 1, and under hunk
+  2 at the end of the file; focus stays in your window; a click on ✓
+  Approve in the popup applies the hunk, and the popup moves on to the
+  next hunk after the pause
+- [X] Found and fixed in the screenshots: only the text had the popup's
+  colour; it was 4 lines tall for 2 (=window-min-height=); placing it
+  above a hunk covered the hunk
+** Found by you
+- [X] Clicking a popup button did nothing: your Emacs reported the click
+  as drag-mouse-1, because the popup moved a pixel between press and
+  release. Buttons now take drags as clicks, and the popup holds still
+  while you click in it
+- [X] Found while fixing it (from M4): a chat block drawn before Emacs
+  showed the edit stayed "Waiting for review…" without keys; it is now
+  redrawn when the edit shows
+** Visual gate (passed 20 Nov 2026, in your Doom Emacs)
+- [X] Move the cursor into a hunk and pause: the popup opens below it
+- [X] Click ✓ Approve, and ✗ Reject… (a note is asked for): each acts on
+  that hunk, and your cursor stays in your window
+- [X] Hover over a hunk with the mouse: its popup opens
+- [X] Keep typing in the file while a popup is open: typing is never
+  interrupted
 
 * TODO M3 · Ask Claude about a hunk [0/4]
 - [ ] "Ask Claude…" (=C-c C-'=) takes a question, with =@claude=

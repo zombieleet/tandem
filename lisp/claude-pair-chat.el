@@ -905,13 +905,12 @@ block until it is resolved.  EXTRA is a plist kept with the block."
                          "    ✗ Denied")
                        'face 'claude-pair-chat-tool-error)))))))
 
-(defun claude-pair-chat--draw-edit (update)
-  "Add the proposed edit in UPDATE to the transcript."
+(defun claude-pair-chat--edit-lines (update)
+  "Return (HEAD . HINT), the two lines of the edit block for UPDATE."
   (let* ((id (plist-get update :requestId))
          (total (cdr (claude-pair-review-hunk-count id)))
          (all (if (and total (> total 1)) " all" "")))
-    (claude-pair-chat--draw-question
-     id
+    (cons
      (propertize (format "  ✎ Claude wants to %s %s%s\n"
                          (if (equal (plist-get update :editKind) "write") "write" "edit")
                          (plist-get update :relPath)
@@ -922,8 +921,45 @@ block until it is resolved.  EXTRA is a plist kept with the block."
                  (claude-pair-chat--key "n") " reject" all "   "
                  (claude-pair-chat--key "d") " reject" all " with a reason   "
                  (claude-pair-chat--key "RET") (if (string-empty-p all) " show" " show, decide hunk by hunk"))
-       (propertize "    Waiting for review…" 'face 'claude-pair-chat-meta))
-     claude-pair-chat-edit-map 'claude-pair-edit)))
+       (propertize "    Waiting for review…" 'face 'claude-pair-chat-meta)))))
+
+(defun claude-pair-chat--draw-edit (update)
+  "Add the proposed edit in UPDATE to the transcript."
+  (let ((lines (claude-pair-chat--edit-lines update)))
+    (claude-pair-chat--draw-question
+     (plist-get update :requestId) (car lines) (cdr lines)
+     claude-pair-chat-edit-map 'claude-pair-edit (list :update update))))
+
+(defun claude-pair-chat--refresh-edit (proposal)
+  "Redraw the chat block of PROPOSAL, now that its hunks are known.
+The block can be drawn before Emacs has shown the edit, and then it
+has neither its keys nor its number of hunks."
+  (let ((id (plist-get proposal :id)))
+    (maphash
+     (lambda (_session buffer)
+       (when (buffer-live-p buffer)
+         (with-current-buffer buffer
+           (when-let* ((entry (and (hash-table-p claude-pair-chat--permissions)
+                                   (gethash id claude-pair-chat--permissions)))
+                       (update (plist-get entry :update)))
+             (let ((lines (claude-pair-chat--edit-lines update))
+                   (start (plist-get entry :start))
+                   (hint-start (plist-get entry :hint-start))
+                   (end (plist-get entry :end)))
+               (claude-pair-chat--editing-transcript
+                 ;; Both lines end in a newline that stays; the markers before
+                 ;; each line do not move when text goes in after them.
+                 (delete-region hint-start (1- end))
+                 (goto-char hint-start)
+                 (insert (claude-pair-chat--read-only (cdr lines)))
+                 (delete-region start (1- hint-start))
+                 (goto-char start)
+                 (insert (claude-pair-chat--read-only (string-remove-suffix "\n" (car lines))))
+                 (add-text-properties start end (list 'keymap claude-pair-chat-edit-map
+                                                      'claude-pair-edit id))))))))
+     claude-pair-chat--buffers)))
+
+(add-hook 'claude-pair-review-show-functions #'claude-pair-chat--refresh-edit)
 
 (defun claude-pair-chat--partial-text (update)
   "Describe the hunk by hunk outcome in UPDATE, one line per hunk not applied."

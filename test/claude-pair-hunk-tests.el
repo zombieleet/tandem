@@ -253,6 +253,29 @@
       (should (string-match-p "◐ Applied 1 of 2 hunks, saved" text))
       (should (string-match-p "✗ hunk 2 (line 9) rejected: keep nine" text)))))
 
+;;;; The chat block, drawn before the edit is shown
+
+(ert-deftest claude-pair-hunk-a-block-drawn-early-gets-its-keys ()
+  (claude-pair-test-with-chat
+    (let ((claude-pair-chat--buffers (make-hash-table :test #'equal)))
+      (puthash "test-session" (current-buffer) claude-pair-chat--buffers)
+      ;; The update arrives before Emacs has shown the edit.
+      (claude-pair-test--feed
+       '(:kind "edit" :state "pending" :requestId "e1" :editKind "edit" :relPath "a.txt" :title "Edit a.txt"))
+      (should (string-match-p "Waiting for review" (claude-pair-test--transcript)))
+      (let ((chat (current-buffer)))
+        (claude-pair-test-with-file claude-pair-test--ten
+          (claude-pair-test--two-hunks file)
+          (with-current-buffer chat
+            (let ((text (claude-pair-test--transcript)))
+              (should (string-match-p "✎ Claude wants to edit a.txt · 2 hunks" text))
+              (should (string-match-p "y apply all" text))
+              (should-not (string-match-p "Waiting for review" text))
+              ;; The keys cover the redrawn block.
+              (goto-char (point-min))
+              (search-forward "apply all")
+              (should (equal (get-text-property (point) 'claude-pair-edit) "e1")))))))))
+
 ;;;; For real
 
 (ert-deftest claude-pair-hunk-partial-for-real ()

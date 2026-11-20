@@ -82,6 +82,17 @@ changes of yours, so nothing of yours is ever saved behind your back."
   "Face for the line above a proposed hunk."
   :group 'claude-pair)
 
+(defface claude-pair-review-banner-active
+  '((t :inherit (highlight claude-pair-review-banner)))
+  "Face for the line above the hunk point is in."
+  :group 'claude-pair)
+
+(defvar claude-pair-review-show-functions nil
+  "Functions called with each proposal once it is shown in its buffer.")
+
+(defvar claude-pair-review-settle-functions nil
+  "Functions called with each hunk once it is decided or withdrawn.")
+
 (defvar claude-pair-review--proposals (make-hash-table :test #'equal)
   "Map from edit request id to its proposal plist.
 A proposal has :id, :buffer, :path, :kind, :session, :new-file and
@@ -106,6 +117,19 @@ A proposal has :id, :buffer, :path, :kind, :session, :new-file and
   :doc "Keys on the lines of a proposed hunk."
   "C-c C-a" #'claude-pair-review-apply-hunk
   "C-c C-k" #'claude-pair-review-reject-hunk)
+
+(defvar-keymap claude-pair-review-apply-button-map
+  :doc "Mouse keys on an \"apply\" button."
+  "<down-mouse-1>" #'ignore
+  "<mouse-1>" #'claude-pair-review-click-apply
+  ;; A click whose press and release land a pixel apart is a "drag".
+  "<drag-mouse-1>" #'claude-pair-review-click-apply)
+
+(defvar-keymap claude-pair-review-reject-button-map
+  :doc "Mouse keys on a \"reject\" button."
+  "<down-mouse-1>" #'ignore
+  "<mouse-1>" #'claude-pair-review-click-reject
+  "<drag-mouse-1>" #'claude-pair-review-click-reject)
 
 (defvar-keymap claude-pair-review-hunk-text-map
   :doc "Keys on a hunk's own text, which you cannot type into anyway."
@@ -557,6 +581,7 @@ PARAMS is the request; CHECK is what `claude-pair-review--check' returned."
         (add-hook 'before-save-hook #'claude-pair-review--before-save -100 t)
         (add-hook 'after-save-hook #'claude-pair-review--after-save 100 t)
         (add-hook 'before-revert-hook #'claude-pair-review--before-revert nil t)
+        (run-hook-with-args 'claude-pair-review-show-functions proposal)
         ;; Where the chat is.  When it is not shown, Claude is waiting for
         ;; you, so show it where you are, unless you are in another tab than
         ;; Claude's: your tabs are never touched.
@@ -569,19 +594,43 @@ PARAMS is the request; CHECK is what `claude-pair-review--check' returned."
                  (if (cdr hunks) (format " (%d hunks)" (length hunks)) "")
                  (claude-pair-layout-where-text))))))
 
-(defun claude-pair-review--banner-text (hunk proposal)
-  "Return the line shown above HUNK of PROPOSAL."
-  (let ((total (length (plist-get proposal :hunks))))
-    (propertize
-     (if (> total 1)
-         ;; Short enough not to wrap in a window of 80 columns.
-         (format "▸ Claude · hunk %d of %d · C-c C-a apply · C-c C-k reject · n/p move\n"
-                 (claude-pair-review--hunk-index hunk) total)
-       (format "▸ Claude proposes %s · C-c C-a applies · C-c C-k rejects\n"
-               (if (eq (plist-get proposal :kind) 'write)
-                   (if (plist-get proposal :new-file) "this new file" "new content for this file")
-                 "an edit")))
-     'face 'claude-pair-review-banner)))
+(defun claude-pair-review-button (label map hunk)
+  "Return LABEL as a button with mouse keys MAP acting on HUNK."
+  (propertize label 'keymap map 'mouse-face 'highlight 'claude-pair-hunk hunk
+              'help-echo "mouse-1: do it"))
+
+(defun claude-pair-review--banner-text (hunk proposal &optional active)
+  "Return the line shown above HUNK of PROPOSAL.
+With ACTIVE, the line of the hunk point is in.  Its key hints are
+buttons too, so in a terminal the line is the hunk's popup."
+  (let* ((total (length (plist-get proposal :hunks)))
+         (apply (claude-pair-review-button
+                 (if (> total 1) "C-c C-a apply" "C-c C-a applies")
+                 claude-pair-review-apply-button-map hunk))
+         (reject (claude-pair-review-button
+                  (if (> total 1) "C-c C-k reject" "C-c C-k rejects")
+                  claude-pair-review-reject-button-map hunk))
+         (text (if (> total 1)
+                   ;; Short enough not to wrap in a window of 80 columns.
+                   (concat (format "▸ Claude · hunk %d of %d · " (claude-pair-review--hunk-index hunk) total)
+                           apply " · " reject " · n/p move\n")
+                 (concat (format "▸ Claude proposes %s · "
+                                 (if (eq (plist-get proposal :kind) 'write)
+                                     (if (plist-get proposal :new-file) "this new file" "new content for this file")
+                                   "an edit"))
+                         apply " · " reject "\n"))))
+    (add-face-text-property 0 (length text)
+                            (if active 'claude-pair-review-banner-active 'claude-pair-review-banner)
+                            t text)
+    text))
+
+(defun claude-pair-review-set-active (hunk active)
+  "Draw HUNK's banner as the one point is in when ACTIVE is non-nil."
+  (when (eq (claude-pair-review--hunk-state hunk) 'pending)
+    (when-let* ((proposal (gethash (claude-pair-review--hunk-id hunk) claude-pair-review--proposals))
+                (banner (claude-pair-review--hunk-banner hunk)))
+      (when (overlay-buffer banner)
+        (overlay-put banner 'before-string (claude-pair-review--banner-text hunk proposal active))))))
 
 (defun claude-pair-review--draw (hunk proposal)
   "Draw HUNK of PROPOSAL: lock and strike its old text, show its new text."
@@ -649,7 +698,8 @@ PARAMS is the request; CHECK is what `claude-pair-review--check' returned."
         (set-marker (nth 1 entry) nil))
       (mapc #'delete-overlay (claude-pair-review--hunk-overlays hunk))
       (setf (claude-pair-review--hunk-state hunk) state
-            (claude-pair-review--hunk-note hunk) note))))
+            (claude-pair-review--hunk-note hunk) note)
+      (run-hook-with-args 'claude-pair-review-settle-functions hunk))))
 
 (defun claude-pair-review--free (hunk)
   "Free HUNK's markers once it is decided."
@@ -848,8 +898,51 @@ With prefix argument ALL, apply every waiting hunk of its edit."
          (proposal (claude-pair-review--proposal (claude-pair-review--hunk-id hunk))))
     (if all
         (claude-pair-review-apply (plist-get proposal :id))
-      (claude-pair-review--apply-one hunk proposal)
-      (claude-pair-review--after-decision proposal))))
+      (claude-pair-review-apply-this-hunk hunk))))
+
+(defun claude-pair-review-apply-this-hunk (hunk)
+  "Apply HUNK, then move to the next one of its edit."
+  (let ((proposal (claude-pair-review--proposal (claude-pair-review--hunk-id hunk))))
+    (claude-pair-review--apply-one hunk proposal)
+    (claude-pair-review--after-decision proposal)))
+
+(defun claude-pair-review-reject-this-hunk (hunk &optional reason)
+  "Reject HUNK, asking for REASON unless given, then move to the next one."
+  (let ((proposal (claude-pair-review--proposal (claude-pair-review--hunk-id hunk)))
+        (reason (or reason (read-string "Tell Claude why you reject this hunk (optional): "))))
+    (claude-pair-review--settle hunk 'rejected reason)
+    (claude-pair-review--after-decision proposal)))
+
+(defun claude-pair-review--clicked-hunk (event)
+  "Return the pending hunk whose button EVENT clicked, and select its window.
+The button is on an overlay string (a banner) or in a buffer (the
+popup); a popup's frame belongs to another window, which it names."
+  (let* ((posn (event-start event))
+         (window (posn-window posn))
+         (string (posn-string posn))
+         (hunk (if string
+                   (get-text-property (cdr string) 'claude-pair-hunk (car string))
+                 (and (windowp window) (posn-point posn)
+                      (get-text-property (posn-point posn) 'claude-pair-hunk (window-buffer window))))))
+    (unless (and hunk (eq (claude-pair-review--hunk-state hunk) 'pending))
+      (user-error "That hunk is no longer waiting"))
+    (let ((home (or (and (windowp window)
+                         (window-parameter window 'claude-pair-popup-for))
+                    window)))
+      (when (window-live-p home)
+        (select-frame-set-input-focus (window-frame home))
+        (select-window home)))
+    hunk))
+
+(defun claude-pair-review-click-apply (event)
+  "Apply the hunk whose button EVENT clicked."
+  (interactive "e")
+  (claude-pair-review-apply-this-hunk (claude-pair-review--clicked-hunk event)))
+
+(defun claude-pair-review-click-reject (event)
+  "Reject the hunk whose button EVENT clicked, asking why."
+  (interactive "e")
+  (claude-pair-review-reject-this-hunk (claude-pair-review--clicked-hunk event)))
 
 (defun claude-pair-review-reject-hunk (&optional all reason)
   "Reject the hunk at point, asking for REASON, an optional note for Claude.
@@ -864,8 +957,7 @@ With prefix argument ALL, reject every waiting hunk of its edit."
                                     "Tell Claude why you reject this hunk (optional): ")))))
     (if all
         (claude-pair-review-reject (plist-get proposal :id) reason)
-      (claude-pair-review--settle hunk 'rejected reason)
-      (claude-pair-review--after-decision proposal))))
+      (claude-pair-review-reject-this-hunk hunk reason))))
 
 (defun claude-pair-review--after-decision (proposal)
   "Move to PROPOSAL's next waiting hunk, or tell Claude the outcome."

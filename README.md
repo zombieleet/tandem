@@ -119,6 +119,15 @@ With point on a hunk:
 | `C-u C-c C-a`, `C-u C-c C-k` | The same for every hunk of the edit |
 | `n`, `p` | On the hunk's own text: the next or previous hunk |
 
+When point rests in a hunk for a moment (`claude-pair-popup-delay`, 0.3 s),
+or the mouse hovers over one, a small popup opens below it: "Claude · hunk 2
+of 3 · file" with ✓ Approve and ✗ Reject… buttons. In a graphical Emacs it
+is a child frame that never takes focus, so you keep typing where you were;
+in a terminal the hunk's banner line lights up and its "apply" and "reject"
+parts are the buttons. `M-RET` opens it at once; it closes when point
+leaves the hunk. `claude-pair-popup-style` picks `child-frame`, `inline` or
+nil (never).
+
 Claude hears what happened to every hunk, with your notes, once the last
 one is decided. The chat shows the edit as a block with its number of
 hunks, where `y` applies all of them, `n` rejects all, `d` rejects all with

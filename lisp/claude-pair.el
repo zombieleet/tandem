@@ -42,6 +42,7 @@
 (require 'claude-pair-chat)
 (require 'claude-pair-layout)
 (require 'claude-pair-review)
+(require 'claude-pair-popup)
 
 ;;;###autoload
 (defun claude-pair-connect ()
