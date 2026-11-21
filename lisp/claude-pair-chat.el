@@ -166,6 +166,11 @@ which inherited them from the Emacs that started it."
   "Map from tool call id to milliseconds its question waited for you.")
 (defvar-local claude-pair-chat--refused nil
   "Tools whose question was denied or withdrawn in the current turn.")
+(defvar-local claude-pair-chat--review-results nil
+  "Your decisions on deferred edits, oldest first, for your next message.
+Each is (TEXT . ID), ID being the edit's request id when TEXT asks a
+question, so Claude's answer goes into that edit's note.")
+
 (defvar-local claude-pair-chat--answering nil
   "Request id of the edit Claude is answering a question about, or nil.
 Claude's text goes into that edit's note as well.")
@@ -198,6 +203,7 @@ SHOWN is non-nil once the call's edit block is in the transcript.")
   "C-c C-c" #'claude-pair-chat-send
   "C-c C-k" #'claude-pair-chat-cancel
   "C-c C-p" #'claude-pair-chat-answer-permission
+  "C-c C-r" #'claude-pair-chat-send-reviews
   "M-p" #'claude-pair-chat-previous-input
   "M-n" #'claude-pair-chat-next-input)
 
@@ -351,6 +357,7 @@ always start a new session."
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
         (list :model claude-pair-chat--model :turn claude-pair-chat--turns
+              :root claude-pair-chat--root
               :prompt (unless (ring-empty-p claude-pair-chat--history)
                         (truncate-string-to-width
                          (car (split-string (ring-ref claude-pair-chat--history 0) "\n"))
@@ -367,12 +374,18 @@ always start a new session."
       (user-error "Claude is still answering; C-c C-k stops it"))
     ;; Draw the message before sending, so it precedes any reply.
     (claude-pair-chat--enqueue (cons 'user text))
+    (when claude-pair-chat--review-results
+      (claude-pair-chat--enqueue
+       (cons 'notice (format "Sent with it: your review of %d deferred edit%s"
+                             (length claude-pair-chat--review-results)
+                             (if (cdr claude-pair-chat--review-results) "s" "")))))
     (claude-pair-chat--flush)
     (setq claude-pair-chat--state "starting")
     (if (condition-case err
             (progn
               (claude-pair-rpc-request 'session/prompt
-                                       (list :sessionId claude-pair-chat--session-id :text text))
+                                       (list :sessionId claude-pair-chat--session-id
+                                             :text (claude-pair-chat--with-reviews text)))
               t)
           (jsonrpc-error
            (setq claude-pair-chat--state "idle")
@@ -382,6 +395,11 @@ always start a new session."
            nil))
         (progn
           (setq claude-pair-chat--turns (1+ claude-pair-chat--turns))
+          ;; A question about a hunk among them: the answer fills its note.
+          (when-let* ((asked (seq-find #'cdr claude-pair-chat--review-results)))
+            (claude-pair-chat--stop-answering)
+            (setq claude-pair-chat--answering (cdr asked)))
+          (setq claude-pair-chat--review-results nil)
           (ring-insert claude-pair-chat--history text)
           (setq claude-pair-chat--history-index nil)
           (claude-pair-chat--set-input "")
@@ -504,7 +522,8 @@ METHOD is the notification's name."
          (when (and (null claude-pair-chat--reviews)
                     (equal claude-pair-chat--state "reviewing"))
            (setq claude-pair-chat--state "running"))
-         (claude-pair-chat--enqueue (cons 'edit-done update)))))
+         (claude-pair-chat--enqueue
+          (cons (if (equal (plist-get update :state) "deferred") 'edit-deferred 'edit-done) update)))))
     ("permission"
      (let ((id (plist-get update :requestId))
            (tool-use (plist-get update :toolUseId)))
@@ -631,6 +650,7 @@ when the daemon refused a path outside the project."
           ('permission (claude-pair-chat--draw-permission (cdr item)))
           ('edit (claude-pair-chat--draw-edit (cdr item)))
           ('edit-done (claude-pair-chat--draw-edit-done (cdr item)))
+          ('edit-deferred (claude-pair-chat--draw-edit-deferred (cdr item)))
           ('permission-done (claude-pair-chat--draw-permission-done (cdr item))))))))
 
 (defalias 'claude-pair-chat--shift-undo #'claude-pair-review-shift-undo
@@ -988,6 +1008,63 @@ has neither its keys nor its number of hunks."
 
 (add-hook 'claude-pair-review-show-functions #'claude-pair-chat--refresh-edit)
 
+(defun claude-pair-chat--with-reviews (text)
+  "Return TEXT, your message, preceded by your review of deferred edits."
+  (if (null claude-pair-chat--review-results)
+      text
+    (concat "My review of your earlier edits (deferred review):\n"
+            (mapconcat (lambda (r) (concat "- " (car r))) claude-pair-chat--review-results "\n")
+            "\n\n" text)))
+
+(defun claude-pair-chat-send-reviews ()
+  "Send your review of deferred edits to Claude, with whatever you typed."
+  (interactive)
+  (claude-pair-chat--check-buffer)
+  (unless claude-pair-chat--review-results
+    (user-error "No review results wait to go to Claude"))
+  (when (string-empty-p (string-trim (claude-pair-chat--input-text)))
+    (claude-pair-chat--set-input "Here is my review; carry on with it in mind."))
+  (claude-pair-chat-send))
+
+(defun claude-pair-chat--on-deferred (session id text)
+  "Keep TEXT, your decision on deferred edit ID, for SESSION's next message."
+  (when-let* ((buffer (gethash session claude-pair-chat--buffers)))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (setq claude-pair-chat--review-results
+              (append claude-pair-chat--review-results
+                      (list (cons text (and (string-match-p "the user asks:" text) id)))))
+        (claude-pair-chat--resolve-question
+         id (propertize (concat "    ✓ Decided; goes to Claude with your next message (C-c C-r sends it now)")
+                        'face 'claude-pair-chat-tool))
+        (force-mode-line-update)))))
+
+(add-hook 'claude-pair-review-deferred-functions #'claude-pair-chat--on-deferred)
+
+(defun claude-pair-chat--draw-edit-deferred (update)
+  "Show that the edit in UPDATE waits for you while Claude carries on."
+  (let ((id (plist-get update :requestId)))
+    (when-let* ((entry (gethash id claude-pair-chat--permissions)))
+      (let ((hint-start (plist-get entry :hint-start))
+            (end (plist-get entry :end)))
+        (claude-pair-chat--editing-transcript
+          (delete-region hint-start (1- end))
+          (goto-char hint-start)
+          (insert (claude-pair-chat--read-only
+                   (concat (propertize "    ⧗ Deferred: Claude carries on · " 'face 'claude-pair-chat-meta)
+                           (claude-pair-chat--key "y") " apply   "
+                           (claude-pair-chat--key "n") " reject   "
+                           (claude-pair-chat--key "RET") " show")))
+          (add-text-properties (plist-get entry :start) end
+                               (list 'keymap claude-pair-chat-edit-map 'claude-pair-edit id)))))))
+
+(defun claude-pair-chat--refresh-headers (&rest _)
+  "Redraw the header lines, whose counts of waiting hunks may have changed."
+  (force-mode-line-update t))
+
+(add-hook 'claude-pair-review-show-functions #'claude-pair-chat--refresh-headers)
+(add-hook 'claude-pair-review-settle-functions #'claude-pair-chat--refresh-headers)
+
 (defun claude-pair-chat--stop-answering ()
   "Finish the note Claude was answering into, if any."
   (when claude-pair-chat--answering
@@ -1194,6 +1271,15 @@ Claude Code saves the rule in the project's .claude/settings.local.json."
           (when claude-pair-chat--model
             (concat " · " claude-pair-chat--model))
           " · " (claude-pair-chat--state-text)
+          (let ((waiting (claude-pair-review-waiting claude-pair-chat--session-id)))
+            (when (> waiting 0)
+              (propertize (format " · %d hunk%s waiting" waiting (if (= waiting 1) "" "s"))
+                          'face 'claude-pair-chat-ask)))
+          (when claude-pair-chat--review-results
+            (propertize (format " · %d review result%s for Claude (C-c C-r)"
+                                (length claude-pair-chat--review-results)
+                                (if (cdr claude-pair-chat--review-results) "s" ""))
+                        'face 'claude-pair-chat-ask))
           (when (and (numberp claude-pair-chat--cost) (> claude-pair-chat--cost 0))
             (format " · $%.4f" claude-pair-chat--cost))))
 

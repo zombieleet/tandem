@@ -25,7 +25,7 @@ import (
 // the proposal (edit/withdraw).
 
 type editAnswer struct {
-	Outcome string `json:"outcome"` // applied, rejected, partial, question or error
+	Outcome string `json:"outcome"` // applied, rejected, partial, question, deferred or error
 	Message string `json:"message"`
 	Saved   bool   `json:"saved"`
 	Created bool   `json:"created"`
@@ -168,6 +168,11 @@ func editOutcome(rel string, a editAnswer) toolResult {
 		return toolResult{Text: partialOutcome(rel, a), IsError: true}
 	case "question":
 		return toolResult{Text: questionOutcome(rel, a)}
+	case "deferred":
+		return toolResult{Text: "The user reviews edits later (deferred review). Your edit to " + rel +
+			" is shown to them as a proposal and is NOT applied yet: the file still has its old text. " +
+			"Carry on with your task without relying on this change; the user's decisions come in a " +
+			"later message. Do not send the same change again."}
 	default:
 		message := a.Message
 		if message == "" {
@@ -297,9 +302,9 @@ func (d *Daemon) answerEdit(c *client, params json.RawMessage) (any, error) {
 	}
 	if len(params) == 0 || json.Unmarshal(params, &p) != nil || p.RequestID == "" ||
 		(p.Outcome != "applied" && p.Outcome != "rejected" && p.Outcome != "partial" &&
-			p.Outcome != "question" && p.Outcome != "error") {
+			p.Outcome != "question" && p.Outcome != "deferred" && p.Outcome != "error") {
 		return nil, rpc.Errorf(protocol.InvalidParams,
-			`edit/answer needs a requestId and an outcome of "applied", "rejected", "partial", "question" or "error"`)
+			`edit/answer needs a requestId and an outcome of "applied", "rejected", "partial", "question", "deferred" or "error"`)
 	}
 	if (p.Outcome == "partial" || p.Outcome == "question") && len(p.Hunks) == 0 {
 		return nil, rpc.Errorf(protocol.InvalidParams, `a %q edit/answer needs its hunks`, p.Outcome)

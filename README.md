@@ -138,7 +138,22 @@ claude-pair-review-dismiss-note` removes; the note shows the first
 `claude-pair-review-note-lines` lines (6).
 
 Claude hears what happened to every hunk, with your notes, once the last
-one is decided. The chat shows the edit as a block with its number of
+one is decided.
+
+`M-x claude-pair-review` lists every hunk waiting for you, across files and
+chats: file, hunk, line, size of the change, chat and how long it has
+waited. `RET` shows the hunk, `a` applies it, `r` rejects it, `?` asks
+Claude about it, `A` and `R` apply or reject its whole edit. The chat's
+header line shows how many hunks wait.
+
+How Claude's edits wait for you is `claude-pair-review-style`, or `M-x
+claude-pair-set-review-style`:
+
+| Style | What happens |
+|---|---|
+| `blocking` (default) | Claude waits for your decision on each edit |
+| `deferred` | Claude is told the edit waits for your review and carries on. Your decisions are kept ("1 review result for Claude" in the header) and go to Claude with your next message, or alone with `C-c C-r` in the chat |
+| `auto-accept` | Edits are applied as they arrive, still coloured as Claude's, and undone like any change | The chat shows the edit as a block with its number of
 hunks, where `y` applies all of them, `n` rejects all, `d` rejects all with
 a note and `RET` shows the first hunk. Changes at most
 `claude-pair-review-merge-gap` unchanged lines apart (2) make one hunk.

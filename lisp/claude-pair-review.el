@@ -66,6 +66,21 @@ changes of yours, so nothing of yours is ever saved behind your back."
   :type 'boolean
   :group 'claude-pair)
 
+(defcustom claude-pair-review-style 'blocking
+  "How Claude's edits wait for you.
+`blocking': Claude waits for your decision on each edit.
+`deferred': Claude is told the edit waits for your review and carries
+on; your decisions go to Claude with your next message.
+`auto-accept': edits are applied as they arrive, still coloured as
+Claude's, and undone like any change."
+  :type '(choice (const blocking) (const deferred) (const auto-accept))
+  :group 'claude-pair)
+
+(defvar claude-pair-review-deferred-functions nil
+  "Functions called when you finish deciding a deferred edit.
+Each gets the session id, the edit's request id, and a sentence telling
+Claude what you decided; the sentence is a question when you asked one.")
+
 (defcustom claude-pair-review-merge-gap 2
   "Unchanged lines between two changes up to which they make one hunk."
   :type 'natnum
@@ -533,7 +548,9 @@ PARAMS is the request; CHECK is what `claude-pair-review--check' returned."
                             specs))
              (proposal (list :id id :buffer (current-buffer) :path path :kind kind
                              :session (plist-get params :sessionId) :hunks hunks
-                             :new-file (not (file-exists-p path)))))
+                             :new-file (not (file-exists-p path))
+                             :shown (float-time)
+                             :deferred (eq claude-pair-review-style 'deferred))))
         (puthash id proposal claude-pair-review--proposals)
         (dolist (hunk hunks)
           (claude-pair-review--draw hunk proposal))
@@ -549,10 +566,21 @@ PARAMS is the request; CHECK is what `claude-pair-review--check' returned."
                                  :pos (overlay-start (claude-pair-review--hunk-banner (car hunks)))
                                  :session (plist-get params :sessionId)
                                  :fallback (not (claude-pair-layout-elsewhere-p)))
-        (message "claude-pair: Claude proposes an edit to %s%s%s; C-c C-a applies a hunk, C-c C-k rejects it"
-                 (file-name-nondirectory path)
-                 (if (cdr hunks) (format " (%d hunks)" (length hunks)) "")
-                 (claude-pair-layout-where-text))))))
+        (pcase claude-pair-review-style
+          ('deferred
+           ;; Claude carries on; your decisions go to it later.
+           (claude-pair-review--answer id "deferred")
+           (message "claude-pair: Claude's edit to %s waits for your review (deferred)%s"
+                    (file-name-nondirectory path) (claude-pair-layout-where-text)))
+          ('auto-accept
+           (run-at-time 0 nil (lambda ()
+                                (when (claude-pair-review-pending-p id)
+                                  (claude-pair-review-apply id)))))
+          (_
+           (message "claude-pair: Claude proposes an edit to %s%s%s; C-c C-a applies a hunk, C-c C-k rejects it"
+                    (file-name-nondirectory path)
+                    (if (cdr hunks) (format " (%d hunks)" (length hunks)) "")
+                    (claude-pair-layout-where-text))))))))
 
 (defun claude-pair-review-button (label map hunk)
   "Return LABEL as a button with mouse keys MAP acting on HUNK."
@@ -778,6 +806,12 @@ With AUTHOR, an authorship record id, mark TEXT as Claude's."
                                     hunks))))
       (mapc #'claude-pair-review--free hunks)
       (cond
+       ((plist-get proposal :deferred)
+        (run-hook-with-args 'claude-pair-review-deferred-functions
+                            (plist-get proposal :session) id
+                            (claude-pair-review--summary proposal))
+        (message "claude-pair: your review of Claude's edit to %s goes to Claude with your next message"
+                 name))
        ((memq 'asked states)
         (let ((question (claude-pair-review--hunk-note
                          (seq-find (lambda (h) (eq (claude-pair-review--hunk-state h) 'asked)) hunks))))
@@ -831,6 +865,77 @@ With AUTHOR, an authorship record id, mark TEXT as Claude's."
 (defun claude-pair-review-pending-p (id)
   "Return non-nil if edit ID waits for your decision in this Emacs."
   (and (gethash id claude-pair-review--proposals) t))
+
+(defun claude-pair-review-waiting (&optional session)
+  "Return how many hunks wait for your decision, of SESSION's edits or all."
+  (let ((n 0))
+    (maphash (lambda (_id p)
+               (when (or (null session) (equal session (plist-get p :session)))
+                 (setq n (+ n (length (claude-pair-review--pending p))))))
+             claude-pair-review--proposals)
+    n))
+
+(defun claude-pair-review--name (proposal)
+  "Return PROPOSAL's file name, relative to its chat's project when known."
+  (let* ((path (plist-get proposal :path))
+         (root (and (fboundp 'claude-pair-chat-session-info)
+                    (plist-get (claude-pair-chat-session-info (plist-get proposal :session)) :root))))
+    (if (and root (file-in-directory-p path root))
+        (file-relative-name path root)
+      (abbreviate-file-name path))))
+
+(defun claude-pair-review--summary (proposal)
+  "Return a sentence telling Claude what you decided on PROPOSAL."
+  (let* ((name (claude-pair-review--name proposal))
+         (hunks (plist-get proposal :hunks))
+         (states (mapcar #'claude-pair-review--hunk-state hunks))
+         (applied (seq-filter (lambda (h) (eq (claude-pair-review--hunk-state h) 'applied)) hunks))
+         (saved (and applied (seq-every-p #'claude-pair-review--hunk-saved applied)))
+         (where (lambda (h) (if (cdr hunks)
+                                (format "hunk %d (line %d)" (claude-pair-review--hunk-index h)
+                                        (claude-pair-review--hunk-line h))
+                              "it")))
+         (note (lambda (h) (let ((n (claude-pair-review--hunk-note h)))
+                             (if (and n (not (string-empty-p n))) (format " (note: %s)" n) "")))))
+    (cond
+     ((memq 'asked states)
+      (let ((asked (seq-find (lambda (h) (eq (claude-pair-review--hunk-state h) 'asked)) hunks)))
+        (format "About your edit to %s, %s, the user asks: %s%s"
+                name (funcall where asked) (claude-pair-review--hunk-note asked)
+                (if applied
+                    (format " (applied first: %s; the rest is not applied)"
+                            (mapconcat (lambda (h) (format "hunk %d" (claude-pair-review--hunk-index h)))
+                                       applied ", "))
+                  " (not applied)"))))
+     ((seq-every-p (lambda (s) (eq s 'applied)) states)
+      (format "Your edit to %s was applied%s." name
+              (if saved " and saved" ", not saved yet, because the buffer has unsaved changes of the user's")))
+     ((seq-every-p (lambda (s) (eq s 'rejected)) states)
+      (format "Your edit to %s was rejected%s; do not send it again."
+              name (mapconcat note hunks "")))
+     ((and (null (cdr hunks)) (eq (car states) 'error))
+      (format "Your edit to %s was not applied: %s" name (claude-pair-review--hunk-note (car hunks))))
+     (t
+      (format "Your edit to %s, hunk by hunk: %s. Read the file again before you edit it."
+              name
+              (mapconcat (lambda (h)
+                           (format "%s %s%s" (funcall where h)
+                                   (pcase (claude-pair-review--hunk-state h)
+                                     ('applied "applied") ('rejected "rejected") (_ "not applied"))
+                                   (funcall note h)))
+                         hunks "; "))))))
+
+(defun claude-pair-set-review-style (style)
+  "Set how Claude's edits wait for you, to STYLE; see `claude-pair-review-style'."
+  (interactive
+   (list (intern (completing-read (format "Review style (now %s): " claude-pair-review-style)
+                                  '("blocking" "deferred" "auto-accept") nil t))))
+  (setq claude-pair-review-style style)
+  (message "claude-pair: Claude's next edits are %s"
+           (pcase style
+             ('blocking "reviewed while Claude waits")
+             ('deferred "reviewed when you like, while Claude carries on")
+             (_ "applied as they arrive"))))
 
 (defun claude-pair-review-hunk-count (id)
   "Return (WAITING . TOTAL), the hunks of edit ID, or nil if it is not waiting."
@@ -1062,7 +1167,8 @@ With prefix argument ALL, reject every waiting hunk of its edit."
 (defun claude-pair-review--after-decision (proposal)
   "Move to PROPOSAL's next waiting hunk, or tell Claude the outcome."
   (if-let* ((next (car (claude-pair-review--pending proposal))))
-      (progn (goto-char (overlay-start (claude-pair-review--hunk-banner next)))
+      (progn (when (eq (current-buffer) (plist-get proposal :buffer))
+               (goto-char (overlay-start (claude-pair-review--hunk-banner next))))
              (message "claude-pair: %d more hunk%s of this edit to decide"
                       (length (claude-pair-review--pending proposal))
                       (if (cdr (claude-pair-review--pending proposal)) "s" "")))

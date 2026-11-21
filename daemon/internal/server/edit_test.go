@@ -271,3 +271,26 @@ func TestQuestionAboutAHunk(t *testing.T) {
 		t.Fatalf("text:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+func TestDeferredEditLetsClaudeCarryOn(t *testing.T) {
+	d := startDaemon(t, 0, "cpd-")
+	c := ready(t, d)
+	id := createSessionIn(t, c, project(t))
+	prompt(t, c, id, editPrompt(t, map[string]any{"file": "a.txt", "old": "x", "new": "y"}))
+	p := c.nextNotification("edit/propose")
+	wantOK(t, answerEdit(c, p["requestId"].(string), map[string]any{"outcome": "deferred"}))
+	updates := c.untilIdle(id)
+	if got := turnText(updates); !strings.Contains(got, "is NOT applied yet") ||
+		!strings.Contains(got, "decisions come in a later message") {
+		t.Fatalf("text %q", got)
+	}
+	var deferred bool
+	for _, u := range updates {
+		if u["kind"] == "edit" && u["state"] == "deferred" {
+			deferred = true
+		}
+	}
+	if !deferred {
+		t.Fatal("followers did not see the edit deferred")
+	}
+}

@@ -200,15 +200,37 @@ check, and a milestone is committed before the next one starts.
 - [X] =M-x claude-pair-blame= on one of Claude's lines, and =C-u M-x
   claude-pair-blame=
 
-* TODO M6 · Review dashboard and review styles [0/3]
-- [ ] =M-x claude-pair-review=: every pending hunk across files in a
-  list; jump, apply or reject from it
-- [ ] =claude-pair-review-style=: =blocking= (default), =deferred=
-  (Claude keeps working; your decisions go back at the end of the turn),
-  =auto-accept= (applied at once, still coloured and revertable)
-- [ ] The header line shows how many hunks wait
-** Visual gate
-- [ ] A deferred turn with edits in two files, decided from the dashboard
+* DONE M6 · Review dashboard and review styles [3/3]
+- [X] =M-x claude-pair-review=: every waiting hunk across files and chats
+  (file, hunk, line, change, chat, waiting); =RET= shows it, =a= / =r= /
+  =?= apply, reject, ask, =A= / =R= the whole edit; it follows decisions
+  made anywhere
+- [X] =claude-pair-review-style= (or =M-x claude-pair-set-review-style=):
+  =blocking= (default); =deferred=: Claude hears at once that the edit is
+  not applied yet and carries on (outcome =deferred=, protocol 0.9.0), the
+  proposal stays, and your decisions go to Claude with your next message
+  or alone with =C-c C-r=; =auto-accept=: applied as they arrive, still
+  coloured and undoable
+- [X] The chat's header line shows the hunks waiting and the review
+  results kept for Claude
+** Auto
+- [X] ERT: the list, deciding from it, following decisions made in the
+  file, showing a hunk, auto-accept, deferred answers and summaries, the
+  style command, the chat keeping and sending your review, =C-c C-r=, the
+  header count (11 tests); Go: the deferred wording; =make check= clean
+  (174 ERT tests)
+** Interactive check run by Claude (terminal Emacs, real keys, fake claude)
+- [X] Deferred style: Claude's turn ended at once ("NOT applied yet"),
+  header "2 hunks waiting"; =a= and =r= in =M-x claude-pair-review=
+  applied hunk 1 and rejected hunk 2 with a note; header "1 review result
+  for Claude"; the next message carried the review to Claude
+** Visual gate (passed 21 Nov 2026, in your Doom Emacs)
+- [X] =M-x claude-pair-set-review-style RET deferred=, then ask Claude for
+  edits in two files: Claude carries on; =M-x claude-pair-review= lists
+  them; decide some there and some in the files
+- [X] Send a message: Claude gets your review with it and acts on it
+- [X] =auto-accept=: edits land at once, coloured; =C-/= undoes them
+- [X] Back to =blocking=: as before
 
 * TODO M7 · Phase 2 wrap-up [0/3]
 - [ ] README and protocol document

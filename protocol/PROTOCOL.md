@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.8.0**. This document is the contract between the Emacs client
+Version **0.9.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -238,7 +238,10 @@ review itself is the question, and no permission rule can skip it.
    `editKind`, `filePath`, `relPath`, `title`.
 4. The client checks the edit against the file's live buffer, shows it, and
    answers with `edit/answer` `{requestId, outcome: "applied" | "rejected" |
-   "partial" | "question" | "error", message, saved, created, hunks}`. A client may
+   "partial" | "question" | "deferred" | "error", message, saved, created,
+   hunks}`. `deferred` means the user reviews the edit later: Claude is
+   told it is not applied yet and carries on; the client keeps the
+   proposal and reports the decisions in a later prompt of its own. A client may
    split an edit into hunks for the user to decide one by one; `hunks` then
    lists each one as `{index, line, oldLines, newLines, decision:
    "applied" | "rejected" | "error" | "asked" | "undecided", note, saved}`,
