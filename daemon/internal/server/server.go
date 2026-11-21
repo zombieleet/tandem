@@ -668,9 +668,14 @@ func (d *Daemon) prompt(c *client, params json.RawMessage) (any, error) {
 	var p struct {
 		SessionID string `json:"sessionId"`
 		Text      string `json:"text"`
+		// PermissionMode is "default" or "plan"; empty means default.
+		PermissionMode string `json:"permissionMode"`
 	}
 	if len(params) == 0 || json.Unmarshal(params, &p) != nil || p.Text == "" {
 		return nil, rpc.Errorf(protocol.InvalidParams, "session/prompt needs a sessionId and some text")
+	}
+	if p.PermissionMode != "" && p.PermissionMode != "default" && p.PermissionMode != "plan" {
+		return nil, rpc.Errorf(protocol.InvalidParams, `permissionMode must be "default" or "plan", got %q`, p.PermissionMode)
 	}
 	d.mu.Lock()
 	e, ok := d.sessions[p.SessionID]
@@ -682,7 +687,7 @@ func (d *Daemon) prompt(c *client, params json.RawMessage) (any, error) {
 	if !ok {
 		return nil, rpc.Errorf(protocol.UnknownSession, "no session %q", p.SessionID)
 	}
-	if err := e.s.Prompt(p.Text); err != nil {
+	if err := e.s.PromptIn(p.PermissionMode, p.Text); err != nil {
 		if errors.Is(err, session.ErrBusy) {
 			return nil, rpc.Errorf(protocol.SessionBusy, "%s", err.Error())
 		}

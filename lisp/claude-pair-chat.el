@@ -198,6 +198,28 @@ run in the chat buffer.")
 Each gets the text; the first that returns non-nil has handled it, and
 nothing goes to Claude.  One that handles it empties the composer.")
 
+(defvar claude-pair-chat-permission-functions nil
+  "Functions called with each permission update, a plist, in the chat buffer.
+Pending, answered and withdrawn questions all come here, after the
+chat has handled them.")
+
+(defvar claude-pair-chat-plan-open-function nil
+  "Function that opens Claude's plan, request ID, for you to edit, or nil.
+With one, a plan question (ExitPlanMode) is not allowed from the chat:
+y and RET open the plan instead, where you approve it.")
+
+(defun claude-pair-chat--plan-question-p (id)
+  "Return non-nil if request ID is Claude's plan, to open for editing."
+  (and claude-pair-chat-plan-open-function
+       (equal (plist-get (gethash id claude-pair-chat--asked-at) :toolName) "ExitPlanMode")))
+
+(defvar claude-pair-chat-turn-functions nil
+  "Functions called when a turn ends, in the chat buffer.
+Each gets the text Claude wrote in that turn and the result plist.")
+
+(defvar-local claude-pair-chat--turn-text nil
+  "Claude's text in the running turn, newest piece first.")
+
 (defvar claude-pair-chat-session-functions nil
   "Functions called with a chat buffer whose session has just started or reopened.")
 
@@ -428,8 +450,10 @@ always start a new session.  To reopen an older chat, use
     (unless (run-hook-with-args-until-success 'claude-pair-chat-send-functions text)
       (claude-pair-chat--send-to-claude text))))
 
-(defun claude-pair-chat--send-to-claude (text)
-  "Send TEXT, your message, to Claude."
+(defun claude-pair-chat--send-to-claude (text &optional mode)
+  "Send TEXT, your message, to Claude.
+MODE is the permission mode of the turn: nil for the usual one, or
+\"plan\", in which Claude reads and plans but changes nothing."
   (progn
     (when (claude-pair-chat--busy-p)
       (user-error "Claude is still answering; C-c C-k stops it"))
@@ -445,10 +469,13 @@ always start a new session.  To reopen an older chat, use
           claude-pair-chat--turn-started (float-time))
     (if (condition-case err
             (progn
+              (setq claude-pair-chat--turn-text nil)
               (claude-pair-rpc-request 'session/prompt
-                                       (list :sessionId claude-pair-chat--session-id
-                                             :text (claude-pair-chat--with-reviews
-                                                    (claude-pair-chat--expand text))))
+                                       (append
+                                        (list :sessionId claude-pair-chat--session-id
+                                              :text (claude-pair-chat--with-reviews
+                                                     (claude-pair-chat--expand text)))
+                                        (when mode (list :permissionMode mode))))
               t)
           (jsonrpc-error
            (setq claude-pair-chat--state "idle")
@@ -531,6 +558,7 @@ METHOD is the notification's name."
      (setq claude-pair-chat--state "writing")
      (when claude-pair-chat--answering
        (claude-pair-review-note-append claude-pair-chat--answering (plist-get update :delta)))
+     (push (plist-get update :delta) claude-pair-chat--turn-text)
      (claude-pair-chat--enqueue (cons 'text (plist-get update :delta))))
     ("tool"
      (cond
@@ -559,6 +587,9 @@ METHOD is the notification's name."
      (claude-pair-chat--enqueue (cons 'todo (plist-get update :items))))
     ("result"
      (claude-pair-chat--stop-answering)
+     (let ((text (apply #'concat (reverse claude-pair-chat--turn-text))))
+       (setq claude-pair-chat--turn-text nil)
+       (run-hook-with-args 'claude-pair-chat-turn-functions text update))
      (let ((cost (plist-get update :sessionCostUsd)))
        (when (numberp cost)
          (setq claude-pair-chat--cost cost)))
@@ -613,7 +644,8 @@ METHOD is the notification's name."
          (when (and (null claude-pair-chat--pending)
                     (equal claude-pair-chat--state "waiting"))
            (setq claude-pair-chat--state "running"))
-         (claude-pair-chat--enqueue (cons 'permission-done update))))))
+         (claude-pair-chat--enqueue (cons 'permission-done update))))
+     (run-hook-with-args 'claude-pair-chat-permission-functions update)))
   (force-mode-line-update))
 
 (defun claude-pair-chat--edit-call (update)
@@ -643,10 +675,14 @@ when the daemon refused a path outside the project."
                         (side . right) (slot . 0)
                         (window-width . ,claude-pair-chat-window-width)
                         (inhibit-switch-frame . t))))
-    (message "claude-pair: Claude wants to %s %s.  In the chat%s, y allows, a always allows, n denies."
-             (claude-pair-chat--verb (plist-get update :toolName))
-             (claude-pair-chat--subject update)
-             (claude-pair-layout-where-text))))
+    (if (and claude-pair-chat-plan-open-function
+             (equal (plist-get update :toolName) "ExitPlanMode"))
+        (message "claude-pair: Claude's plan is ready: edit it, then C-c C-c to go ahead (C-c C-k: no).  \
+In the chat%s, y opens it." (claude-pair-layout-where-text))
+      (message "claude-pair: Claude wants to %s %s.  In the chat%s, y allows, a always allows, n denies."
+               (claude-pair-chat--verb (plist-get update :toolName))
+               (claude-pair-chat--subject update)
+               (claude-pair-layout-where-text)))))
 
 (defun claude-pair-chat--on-disconnect ()
   "Tell every chat buffer that the daemon connection closed."
@@ -1003,6 +1039,16 @@ block until it is resolved.  EXTRA is a plist kept with the block."
   "Add the permission question in UPDATE to the transcript."
   (let ((tool (plist-get update :toolName))
         (rule (or (plist-get update :alwaysRule) (plist-get update :toolName))))
+    (if (and claude-pair-chat-plan-open-function (equal tool "ExitPlanMode"))
+        (claude-pair-chat--draw-question
+         (plist-get update :requestId)
+         (propertize "  📋 Claude's plan is ready.  Edit it in Org, then C-c C-c there to go ahead.\n"
+                     'face 'claude-pair-chat-ask)
+         (concat "    " (claude-pair-chat--key "y") " or " (claude-pair-chat--key "RET") " open the plan   "
+                 (claude-pair-chat--key "n") " say no   "
+                 (claude-pair-chat--key "d") " say no with a reason")
+         claude-pair-chat-permission-map 'claude-pair-request
+         (list :rule rule))
     (claude-pair-chat--draw-question
      (plist-get update :requestId)
      (concat (propertize (format "  ⏸ Claude wants to %s:\n" (claude-pair-chat--verb tool))
@@ -1014,7 +1060,7 @@ block until it is resolved.  EXTRA is a plist kept with the block."
              "   " (claude-pair-chat--key "n") " deny   "
              (claude-pair-chat--key "d") " deny with a reason")
      claude-pair-chat-permission-map 'claude-pair-request
-     (list :rule rule))))
+     (list :rule rule)))))
 
 (defun claude-pair-chat--draw-permission-done (update)
   "Replace the keys of the question UPDATE answers or withdraws with the outcome."
@@ -1263,29 +1309,39 @@ has neither its keys nor its number of hunks."
       (car claude-pair-chat--pending)
       (user-error "No permission question is waiting")))
 
-(defun claude-pair-chat--answer (id decision &optional always message)
+(defun claude-pair-chat--answer (id decision &optional always message input)
   "Answer permission request ID with DECISION, \"allow\" or \"deny\".
-ALWAYS adds a rule; MESSAGE tells Claude why it was denied."
+ALWAYS adds a rule; MESSAGE tells Claude why it was denied.  INPUT, a
+plist, replaces the tool's input when allowed."
   (condition-case err
       (claude-pair-rpc-request 'permission/answer
-                               (list :requestId id :decision decision
-                                     :always (if always t :json-false)
-                                     :message (or message "")))
+                               (append
+                                (list :requestId id :decision decision
+                                      :always (if always t :json-false)
+                                      :message (or message ""))
+                                (when input (list :updatedInput input))))
     (jsonrpc-error
      (message "claude-pair: %s" (claude-pair-rpc-error-message err)))))
 
 (defun claude-pair-chat-allow ()
-  "Allow the permission request at point, once."
+  "Allow the permission request at point, once.
+For Claude's plan, open it instead: you approve it there."
   (interactive)
   (claude-pair-chat--check-buffer)
-  (claude-pair-chat--answer (claude-pair-chat--request-at-point) "allow"))
+  (let ((id (claude-pair-chat--request-at-point)))
+    (if (claude-pair-chat--plan-question-p id)
+        (funcall claude-pair-chat-plan-open-function id)
+      (claude-pair-chat--answer id "allow"))))
 
 (defun claude-pair-chat-allow-always ()
   "Allow the permission request at point, and keep allowing it in this project.
 Claude Code saves the rule in the project's .claude/settings.local.json."
   (interactive)
   (claude-pair-chat--check-buffer)
-  (claude-pair-chat--answer (claude-pair-chat--request-at-point) "allow" t))
+  (let ((id (claude-pair-chat--request-at-point)))
+    (if (claude-pair-chat--plan-question-p id)
+        (funcall claude-pair-chat-plan-open-function id)
+      (claude-pair-chat--answer id "allow" t))))
 
 (defun claude-pair-chat-deny ()
   "Deny the permission request at point."
@@ -1305,6 +1361,9 @@ Claude Code saves the rule in the project's .claude/settings.local.json."
   "Answer the permission request at point, or the oldest one, from a menu."
   (interactive)
   (claude-pair-chat--check-buffer)
+  (when (claude-pair-chat--plan-question-p (claude-pair-chat--request-at-point))
+    (funcall claude-pair-chat-plan-open-function (claude-pair-chat--request-at-point))
+    (user-error "Edit the plan, then C-c C-c to go ahead or C-c C-k to say no"))
   (let* ((id (claude-pair-chat--request-at-point))
          (rule (plist-get (gethash id claude-pair-chat--permissions) :rule))
          (choice (read-multiple-choice

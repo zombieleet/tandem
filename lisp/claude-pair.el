@@ -50,6 +50,7 @@
 (require 'claude-pair-resume)
 (require 'claude-pair-slash)
 (require 'claude-pair-rewind)
+(require 'claude-pair-plan)
 
 ;; Optional parts: each loads only with the package it works with.
 (autoload 'claude-pair-magit-stage-claude "claude-pair-magit"
@@ -57,6 +58,9 @@
 (autoload 'claude-pair-magit-draft-message "claude-pair-magit"
   "Have Claude write the commit message for what is staged." t)
 (with-eval-after-load 'git-commit (require 'claude-pair-magit))
+(autoload 'claude-pair-org-send-subtree "claude-pair-org"
+  "Send the Org subtree at point to Claude as a task." t)
+(with-eval-after-load 'embark (require 'claude-pair-embark))
 
 ;;;###autoload
 (defun claude-pair-connect ()

@@ -223,3 +223,36 @@ func TestTheHelperIsNotAClient(t *testing.T) {
 		t.Fatal("an idle claude with its helper kept the daemon running")
 	}
 }
+
+func TestPlanModeAndAnEditedPlan(t *testing.T) {
+	d := startDaemon(t, 0, "cpd-")
+	c := ready(t, d)
+	id := createSession(t, c, fakeClaude)
+	wantCode(t, c.request("session/prompt", map[string]string{"sessionId": id, "text": "x", "permissionMode": "yolo"}),
+		protocol.InvalidParams)
+	wantOK(t, c.request("session/prompt", map[string]string{"sessionId": id, "text": "document area", "permissionMode": "plan"}))
+	p := waitPending(c, id)
+	if p["toolName"] != "ExitPlanMode" || len(p["input"].(map[string]any)) != 0 {
+		t.Fatalf("pending %v", p)
+	}
+	// The user's version of the plan goes to Claude.
+	wantOK(t, c.request("permission/answer", map[string]any{
+		"requestId": p["requestId"], "decision": "allow",
+		"updatedInput": map[string]any{"plan": "1. Add a docstring\n2. Add type hints"},
+	}))
+	if got := turnText(c.untilIdle(id)); got != "\nFollowing the plan:\n1. Add a docstring\n2. Add type hints" {
+		t.Fatalf("text %q", got)
+	}
+	// A plain prompt afterwards is in default mode again.
+	prompt(t, c, id, "hello")
+	if got := turnText(c.untilIdle(id)); got != "You said: hello" {
+		t.Fatalf("text %q", got)
+	}
+	// Rejected, with a note.
+	wantOK(t, c.request("session/prompt", map[string]string{"sessionId": id, "text": "again", "permissionMode": "plan"}))
+	p = waitPending(c, id)
+	wantOK(t, answer(c, p["requestId"].(string), "deny", false, "too big"))
+	if got := turnText(c.untilIdle(id)); got != "\nThe plan was rejected: too big" {
+		t.Fatalf("text %q", got)
+	}
+}

@@ -55,7 +55,9 @@
   '((:name "clear" :description "Start a new chat; this one stays in claude-pair-resume"
            :aliases ["reset" "new"])
     (:name "resume" :description "Reopen an earlier chat about this project")
-    (:name "rewind" :description "Go back to before one of your messages: files and conversation"))
+    (:name "rewind" :description "Go back to before one of your messages: files and conversation")
+    (:name "plan" :description "Claude plans the task without changing anything; you edit the plan in Org"
+           :argumentHint "TASK"))
   "Commands claude-pair runs itself.")
 
 (defun claude-pair-slash-refresh (&optional buffer)

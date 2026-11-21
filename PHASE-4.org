@@ -48,11 +48,58 @@ work across worktrees and machines, then evil keys for others.
 - [X] =c c=: no trailer; =M-x claude-pair-magit-draft-message=: a message
   appears from the diff and the chat
 
-* TODO M2 · Embark and Org [0/3]
-- [ ] Embark: "Ask Claude" on files, symbols, regions and identifiers
-- [ ] Org: send a subtree to Claude as a task; the answer goes under it
-- [ ] Plan mode as an editable Org buffer: Claude plans, you edit the
-  plan, then Claude works from your version
+* DONE M2 · Embark and Org [3/3]
+- [X] Embark: =@= in the action menu of a file, symbol, identifier or
+  region asks Claude (=claude-pair-embark.el=, loads with Embark): a file
+  is mentioned in your question, a symbol comes with where you are, a
+  region goes through =claude-pair-ask=
+- [X] Org: =claude-pair-org-send-subtree= sends the subtree as a task to
+  the project's chat; when the turn ends, the answer goes under the
+  heading as "Claude's answer [date]", Markdown turned into Org (code into
+  source blocks, headings below the task's, nothing that starts a heading
+  by accident); =C-u= plans first
+- [X] Plan mode in Org: =claude-pair-plan= and =/plan TASK= send the turn
+  in plan mode (=set_permission_mode= control request, protocol 0.16.0);
+  Claude's plan opens in an Org buffer; =C-c C-c= approves your edited
+  version (=updatedInput= on the =ExitPlanMode= answer), =C-c C-k= says no
+  with a reason. Spikes: Claude Code 2.1.327 follows the plan it gets
+  back (it added type hints that were only in the edit) and switches
+  back to default mode by itself; its =ExitPlanMode= comes with an empty
+  input and the plan meant for a file its blocked Write tool cannot write,
+  so the system prompt asks for the plan in the reply, which the buffer
+  shows
+** Auto
+- [X] Go: plan mode, an edited plan followed, a rejected plan, a bad mode
+  refused. ERT (5): Markdown into Org; =/plan= edited and approved; plan
+  rejected with a reason; an Org subtree's answer under its heading;
+  Embark keys and messages (with Embark from =CLAUDE_PAIR_TEST_PACKAGES=).
+  240 tests with your Doom packages, =make check= clean
+- [X] Found and fixed: a permission question could reach Emacs before the
+  text Claude wrote just ahead of it (it comes through the helper, the
+  text through Claude's output). The daemon now waits until the output has
+  reached the tool call; 30 repeated runs without a failure
+** Found by you
+- [X] The plan buffer opened in a window you were not looking at, and the
+  chat showed the usual question, where =y= allowed =ExitPlanMode= with
+  Claude's plan unchanged, so Claude went ahead. Now the chat block says
+  "Claude's plan is ready": =y= or =RET= open the plan in Org (they never
+  approve it), =n= / =d= say no; the message names the plan buffer; the
+  plan shows beside the chat in the Claude tab and gets the cursor when
+  you were in the chat. Approving is =C-c C-c= in the plan. Test: =y= in
+  the chat opens the plan and answers nothing; screenshot of the layout
+** Live check run by Claude (21 Nov 2026, Haiku, about 3 cents)
+- [X] =/plan Document the function area…=: the Org buffer showed Claude's
+  plan (context, change, verification); I added "Also add the type hints
+  r: float -> float." and approved; Claude's edit, applied through review,
+  had the docstring and the type hints
+** Visual gate (your turn)
+- [X] =/plan= some small change in a project: the plan opens in Org
+  beside the chat, with the cursor in it; change a step, =C-c C-c=: Claude
+  follows your version. In the chat, =y= only opens the plan
+- [X] In an Org file inside a project, on a heading with a small task:
+  =M-x claude-pair-org-send-subtree=: the answer appears under it
+- [X] In a Vertico list of files, or on a symbol, =C-.= (Embark) then =@=:
+  asks Claude
 
 * TODO M3 · Several agents at once [0/2]
 - [ ] One chat per git worktree; a command makes a worktree and its chat

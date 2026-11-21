@@ -64,9 +64,11 @@ var (
 	callMu     sync.Mutex
 	callCancel context.CancelFunc
 
-	resumeAt     string // --resume-session-at
-	lastUUID     string // the transcript's newest record, the next one's parent
-	uuidsStarted bool
+	resumeAt       string // --resume-session-at
+	modeMu         sync.Mutex
+	permissionMode = "default" // set_permission_mode
+	lastUUID       string      // the transcript's newest record, the next one's parent
+	uuidsStarted   bool
 )
 
 func main() {
@@ -155,6 +157,18 @@ func main() {
 				emit(map[string]any{"type": "control_response", "response": map[string]any{
 					"subtype": "success", "request_id": msg.RequestID,
 					"response": map[string]any{"still_queued": []any{}}}})
+			case msg.Type == "control_request" && msg.Request.Subtype == "set_permission_mode":
+				var full struct {
+					Request struct {
+						Mode string `json:"mode"`
+					} `json:"request"`
+				}
+				json.Unmarshal(scanner.Bytes(), &full)
+				modeMu.Lock()
+				permissionMode = full.Request.Mode
+				modeMu.Unlock()
+				emit(map[string]any{"type": "control_response", "response": map[string]any{
+					"subtype": "success", "request_id": msg.RequestID, "response": map[string]any{"mode": full.Request.Mode}}})
 			case msg.Type == "control_request":
 				controlInitialize(msg.RequestID)
 			case msg.Type == "user":
@@ -217,6 +231,12 @@ func controlInitialize(requestID string) {
 func turn(prompt string, args []string) {
 	emit(map[string]any{"type": "system", "subtype": "status", "status": "requesting", "session_id": sessionID})
 	name, arg := "echo", ""
+	modeMu.Lock()
+	planning := permissionMode == "plan"
+	modeMu.Unlock()
+	if planning {
+		name = "plan"
+	}
 	if rest, ok := strings.CutPrefix(prompt, "script:"); ok {
 		name, arg, _ = strings.Cut(rest, ":")
 	} else if rest, ok := strings.CutPrefix(prompt, "/"); ok {
@@ -243,6 +263,25 @@ func turn(prompt string, args []string) {
 				"role": "user", "content": "<local-command-stdout>Compacted </local-command-stdout>"}})
 		} else {
 			assistant(nextMsg(), map[string]any{"type": "text", "text": "Ran /" + command + " with " + args})
+		}
+		result("success", false, nil)
+	case "plan": // plan mode: the plan in the reply, ExitPlanMode with no input as Claude Code 2.1.327 sends it, then the plan that comes back
+		toolID := "toolu_plan1"
+		input := map[string]any{}
+		streamText([]string{"1. Read geo.py\n", "2. Add a docstring to area"}, 0)
+		assistant(nextMsg(), map[string]any{"type": "tool_use", "id": toolID, "name": "ExitPlanMode", "input": input})
+		decision, err := ask("ExitPlanMode", input, toolID)
+		if err != nil || decision["behavior"] != "allow" {
+			message, _ := decision["message"].(string)
+			toolResult(toolID, "rejected: "+message, true)
+			streamText([]string{"\nThe plan was rejected: " + message}, 0)
+		} else {
+			plan, _ := object(decision["updatedInput"])["plan"].(string)
+			modeMu.Lock()
+			permissionMode = "default"
+			modeMu.Unlock()
+			toolResult(toolID, "User has approved your plan.", false)
+			streamText([]string{"\nFollowing the plan:\n" + plan}, 0)
 		}
 		result("success", false, nil)
 	case "hello":
@@ -755,4 +794,10 @@ func emit(v map[string]any) {
 	out.Write(line)
 	out.WriteByte('\n')
 	out.Flush()
+}
+
+// object returns v as a JSON object, or an empty one.
+func object(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	return m
 }

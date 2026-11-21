@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/url"
+	"time"
 
 	"github.com/victory/claude-pair/daemon/internal/mcphelper"
 	"github.com/victory/claude-pair/daemon/internal/protocol"
@@ -23,6 +24,9 @@ type permissionAnswer struct {
 	Decision string `json:"decision"`
 	Always   bool   `json:"always"`
 	Message  string `json:"message"`
+	// UpdatedInput replaces the tool's input when allowed: for
+	// ExitPlanMode, the plan as the user edited it.
+	UpdatedInput json.RawMessage `json:"updatedInput"`
 }
 
 type pendingPermission struct {
@@ -67,6 +71,12 @@ func (d *Daemon) askPermission(ctx context.Context, c *client, params json.RawMe
 	if asker == nil {
 		return deny("No Emacs is connected to answer this permission prompt, so claude-pair denied it."), nil
 	}
+	// The question comes through the helper, Claude's words through its
+	// output: wait until the output has reached the tool call, so Emacs
+	// gets what Claude wrote before it first (a plan, say).
+	if p.ToolUseID != "" {
+		e.s.WaitForTool(ctx, p.ToolUseID, 2*time.Second)
+	}
 
 	req := &pendingPermission{
 		id:        newRequestID("perm-"),
@@ -104,7 +114,11 @@ func (d *Daemon) askPermission(ctx context.Context, c *client, params json.RawMe
 			}
 			return deny(message), nil
 		}
-		return allow(p.Input, rule, a.Always), nil
+		input := p.Input
+		if len(a.UpdatedInput) > 0 && string(a.UpdatedInput) != "null" {
+			input = a.UpdatedInput
+		}
+		return allow(input, rule, a.Always), nil
 	case reason := <-req.withdraw:
 		d.broadcast(p.SessionID, session.Update{
 			"kind": "permission", "state": "withdrawn", "requestId": req.id, "reason": reason,

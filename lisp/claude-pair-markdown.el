@@ -218,5 +218,49 @@ Earlier rendering there is removed first; backticks stay visible."
   (let ((claude-pair-markdown--show-ticks t))
     (claude-pair-markdown-render beg end t)))
 
+;;;; Into Org
+
+(defun claude-pair-markdown--org-inline (line)
+  "Return LINE with Markdown's inline code, bold and links in Org syntax."
+  (let ((case-fold-search nil))
+    (thread-last
+      line
+      (replace-regexp-in-string "`\\([^`\n]+\\)`" "~\\1~")
+      (replace-regexp-in-string "\\*\\*\\([^*\n]+\\)\\*\\*" "*\\1*")
+      (replace-regexp-in-string "\\[\\([^]\n]+\\)\\](\\([^)\n]+\\))" "[[\\2][\\1]]"))))
+
+(defun claude-pair-markdown-to-org (text &optional level)
+  "Return Markdown TEXT as Org, for a subtree at LEVEL (1 by default).
+Fenced code becomes source blocks, headings become headings below
+LEVEL, bullets become dashes, and inline code, bold and links change
+syntax.  Nothing in code blocks changes, and no line of the result can
+start a heading of its own by accident."
+  (let ((level (or level 1))
+        (in-code nil)
+        (lines nil))
+    (dolist (line (split-string text "\n"))
+      (cond
+       ((string-match "\\`[ \t]*```+[ \t]*\\([^` \t]*\\)" line)
+        (push (if in-code
+                  "#+end_src"
+                (concat "#+begin_src" (if (string-empty-p (match-string 1 line)) ""
+                                         (concat " " (match-string 1 line)))))
+              lines)
+        (setq in-code (not in-code)))
+       (in-code
+        ;; Org reads a line starting with * or #+ in a block as its own.
+        (push (if (string-match-p "\\`\\(?:\\*\\|#\\+\\)" line) (concat "," line) line) lines))
+       ((string-match "\\`\\(#+\\)[ \t]+\\(.*\\)" line)
+        (push (concat (make-string (+ level (length (match-string 1 line))) ?*) " "
+                      (claude-pair-markdown--org-inline (match-string 2 line)))
+              lines))
+       ((string-match "\\`\\([ \t]*\\)[*+][ \t]+\\(.*\\)" line)
+        (push (concat (match-string 1 line) "- " (claude-pair-markdown--org-inline (match-string 2 line))) lines))
+       ((string-match-p "\\`\\*" line)
+        (push (concat " " (claude-pair-markdown--org-inline line)) lines))
+       (t (push (claude-pair-markdown--org-inline line) lines))))
+    (when in-code (push "#+end_src" lines))
+    (string-join (nreverse lines) "\n")))
+
 (provide 'claude-pair-markdown)
 ;;; claude-pair-markdown.el ends here

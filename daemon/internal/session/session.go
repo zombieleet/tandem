@@ -4,6 +4,7 @@ package session
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,7 +81,9 @@ const EditingPrompt = "You are running inside claude-pair, which connects you to
 	"defined or where it is used, call " + mcphelper.XrefToolName + " first: when the user's Emacs runs a " +
 	"language server it answers exactly, and it tells you when there is none; only then use grep. " +
 	"Call " + mcphelper.DiagnosticsToolName + " after editing to see errors, " + mcphelper.ImenuToolName +
-	" for a file's outline, and " + mcphelper.SelectionToolName + " when the user says \"this\" or \"here\"."
+	" for a file's outline, and " + mcphelper.SelectionToolName + " when the user says \"this\" or \"here\". " +
+	"In plan mode you cannot write a plan file: write your whole plan in your reply, in Markdown, " +
+	"then call ExitPlanMode; the user edits that plan in Emacs before approving it."
 
 // helperTimeoutMs is how long one MCP call may take: 24 hours.
 const helperTimeoutMs = 24 * 60 * 60 * 1000
@@ -102,6 +105,7 @@ type Session struct {
 	proc      *process // the process that takes the next prompt, or nil
 	resumable bool     // a transcript exists, so later starts use --resume
 	resumeAt  string   // the message the next start goes back to, or ""
+	mode      string   // the permission mode the running claude was last set to
 	closed    bool
 	totalCost float64 // sum of completed turns, across processes
 }
@@ -166,7 +170,15 @@ func (s *Session) TotalCostUSD() float64 {
 }
 
 // Prompt sends text as the next user message, starting claude if needed.
-func (s *Session) Prompt(text string) error {
+func (s *Session) Prompt(text string) error { return s.PromptIn("", text) }
+
+// PromptIn sends text in permission mode, "default" (or "") or "plan": in
+// plan mode Claude only reads and plans, and asks for ExitPlanMode with
+// its plan before it changes anything.
+func (s *Session) PromptIn(mode, text string) error {
+	if mode == "" {
+		mode = "default"
+	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -183,6 +195,18 @@ func (s *Session) Prompt(text string) error {
 			return err
 		}
 		updates = append(updates, Update{"kind": "status", "state": "starting"})
+	}
+	if mode != s.mode {
+		// Claude Code switches mode in the running process.
+		control, _ := json.Marshal(map[string]any{
+			"type": "control_request", "request_id": fmt.Sprintf("mode-%d", time.Now().UnixNano()),
+			"request": map[string]any{"subtype": "set_permission_mode", "mode": mode},
+		})
+		if _, err := s.proc.stdin.Write(append(control, '\n')); err != nil {
+			s.mu.Unlock()
+			return fmt.Errorf("cannot write to claude: %w", err)
+		}
+		s.mode = mode
 	}
 	line, _ := json.Marshal(map[string]any{
 		"type":    "user",
@@ -250,6 +274,31 @@ func (s *Session) Cancel() bool {
 		}
 	}()
 	return true
+}
+
+// WaitForTool waits until claude's output has shown the tool call id, at
+// most timeout, so that everything Claude wrote before the call has been
+// emitted. It returns false if it did not show in time.
+func (s *Session) WaitForTool(ctx context.Context, id string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		s.mu.Lock()
+		seen := false
+		if s.proc != nil {
+			_, seen = s.proc.tools[id]
+		}
+		s.mu.Unlock()
+		if seen {
+			// The emit of the call itself runs just after it is recorded.
+			s.emitMu.Lock()
+			s.emitMu.Unlock()
+			return true
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return false
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 // Rewind goes back to just after Claude's message uuid: the turns after it
@@ -364,6 +413,7 @@ func (s *Session) systemPrompt() string {
 }
 
 func (s *Session) startLocked() error {
+	s.mode = "default" // as --permission-mode says
 	cmd := exec.Command(s.opts.ClaudePath, s.Args(s.resumable)...)
 	cmd.Dir = s.opts.Cwd
 	if len(s.opts.Env) > 0 {

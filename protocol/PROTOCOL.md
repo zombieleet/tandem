@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.15.0**. This document is the contract between the Emacs client
+Version **0.16.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -208,10 +208,21 @@ session instead.
 
 ### `session/prompt` (client → daemon)
 
-Params: `sessionId`, `text`. Result `{ok: true}` once the message is written
-to Claude Code; everything after that arrives as `session/update`. Fails with
-`-32003` while a turn is running and `-32004` for an unknown session. The
-calling client follows the session.
+Params: `sessionId`, `text`, optional `permissionMode`: `"default"` (the
+same as leaving it out) or `"plan"`. Result `{ok: true}` once the message is
+written to Claude Code; everything after that arrives as `session/update`.
+Fails with `-32003` while a turn is running, `-32004` for an unknown session
+and `-32602` for another mode. The calling client follows the session.
+
+When the mode differs from the one the running `claude` was last set to,
+the daemon first writes a `set_permission_mode` control request. In plan
+mode Claude only reads and plans; it asks for `ExitPlanMode`, a permission
+question like any other. Claude Code 2.1 sends that question with an empty
+input and expects the plan in a file its Write tool cannot write here, so
+claude-pair's system prompt asks Claude to write the whole plan in its
+reply first; a client shows that text for the user to edit. Allowing
+`ExitPlanMode` with `updatedInput: {plan}` makes that plan the one Claude
+follows; Claude Code then leaves plan mode by itself.
 
 Each session runs one process:
 
@@ -292,8 +303,12 @@ timeout.
    line, as for tool calls) and `alwaysRule` (the rule "always allow" adds,
    such as `Bash(make test)`).
 4. The client answers with `permission/answer` `{requestId, decision:
-   "allow" | "deny", always, message}`. A request that is no longer pending
-   fails with `-32006`.
+   "allow" | "deny", always, message, updatedInput}`; `updatedInput`, an
+   object, replaces the tool's input when allowed (for `ExitPlanMode`, the
+   plan as the user edited it). A request that is no longer pending fails
+   with `-32006`. The daemon sends the question only once Claude's output
+   has reached the tool call, so whatever Claude wrote before it arrives
+   first.
 5. Followers get `state: "answered"` with `decision`, `always` and `message`.
    A request is instead `state: "withdrawn"` with a `reason` when the turn is
    cancelled, the session closes, the daemon stops, or Claude Code abandons

@@ -91,6 +91,8 @@ emacs -Q -L ~/src/claude-pair/lisp --eval "(require 'claude-pair)"
 | `M-x claude-pair` | Chat with Claude about the current project; reattaches a chat still open in the daemon (`C-u` starts a new one) |
 | `M-x claude-pair-resume` | Reopen an earlier chat about the project, with its conversation |
 | `M-x claude-pair-rewind` | Go back to before one of your messages: files and conversation |
+| `M-x claude-pair-plan` | Give Claude a task to plan first; you edit the plan in Org (`/plan` in the chat) |
+| `M-x claude-pair-org-send-subtree` | Send the Org subtree at point as a task; the answer goes under it |
 | `M-x claude-pair-ask` | Ask Claude about the region, or the function or line at point (`@claude …`) |
 | `M-x claude-pair-review` | List every hunk waiting for your review |
 | `M-x claude-pair-set-review-style` | Choose how Claude's edits wait for you: blocking, deferred, auto-accept |
@@ -295,6 +297,28 @@ Edit proposals open by the same rules. When the chat is not shown, an
 edit proposal or permission question comes to you, since Claude is waiting
 for you, except when you are in another tab than Claude's: then your tab is
 left alone and the echo area tells you to switch (`C-x t o`).
+
+## Plans you edit in Org
+
+`M-x claude-pair-plan`, or `/plan TASK` in the chat, gives Claude a task in
+plan mode: Claude reads what it needs and writes a plan, but changes
+nothing. The plan opens in an Org buffer. Edit it as you like: reorder
+steps, cut some, add your own. `C-c C-c` lets Claude go ahead with your
+version; `C-c C-k` says no, with a reason Claude reads. Claude then works
+from the plan you approved, and its edits still come to you for review.
+Claude Code keeps approved plans in `~/.claude/plans/`.
+
+## Org tasks and Embark
+
+`M-x claude-pair-org-send-subtree` on an Org heading sends the subtree to
+the project's chat as a task. When Claude is done, its answer goes under
+the heading as a new subheading, in Org syntax. With `C-u`, Claude plans
+first. The project is the one the Org file is in; for notes kept
+elsewhere, you pick it.
+
+With Embark, `@` in its action menu asks Claude about the target: a file
+(mentioned in your question), a symbol (with where you are), or a region
+(as `claude-pair-ask`, with the answer shown above it too).
 
 ## Commits with Magit
 
