@@ -86,6 +86,8 @@ BUFFER is bound to nil for BODY to set; it is killed afterwards."
               (claude-pair-model nil)
               (claude-pair-layout-tab nil)
               (buffer nil))
+         ;; A marker, as a real project has, so Claude starts here.
+         (with-temp-file (expand-file-name ".project" project))
          (unwind-protect
              (progn ,@body)
            (when (buffer-live-p buffer)

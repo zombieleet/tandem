@@ -44,7 +44,8 @@ compile:
 test-lisp: daemon fakeclaude
 	$(EMACS) -Q --batch -L lisp -L test \
 	  --eval '(setq load-prefer-newer t)' \
-	  $(addprefix -l ,$(TESTS)) -f ert-run-tests-batch-and-exit
+	  $(addprefix -l ,$(TESTS)) -f ert-run-tests-batch-and-exit </dev/null
+	@# No stdin: a test that asks a question fails at once instead of hanging.
 
 ## test-daemon: run the daemon's Go tests with the race detector
 test-daemon:

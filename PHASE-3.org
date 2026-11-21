@@ -1,0 +1,101 @@
+#+title: claude-pair · Phase 3 · Context
+#+startup: overview
+
+Phase 3 gives Claude more of what you see and know in Emacs, and you more
+control over where it starts and how far back you can go. Done when: it
+works on Linux, macOS and Windows. Same rules as before: automatic tests
+for every change, live checks only when needed, your visual check at the
+end of each milestone, and a milestone is committed before the next one
+starts.
+
+* Decisions
+- 21 Nov 2026 :: The git root stays the default project root. Without
+  git, the nearest folder with a project marker is the root, never your
+  home folder or =/= unless you confirm.
+- 21 Nov 2026 :: Slash commands and rewind start with a spike against the
+  real =claude= in headless mode, since what it supports there decides the
+  design.
+
+* DONE M1 · Where Claude starts [4/4]
+- [X] Without git: the nearest folder upwards with a marker
+  (=claude-pair-project-markers=: =CLAUDE.md=, =AGENTS.md=, =.claude/=,
+  =package.json=, =go.mod=, =pyproject.toml=, =Cargo.toml=, =Makefile=, …),
+  stopping before your home folder (new module =claude-pair-project=)
+- [X] None found: asked, with the file's folder as the default; batch
+  Emacs, which cannot answer, gets a clear error instead of waiting
+- [X] Never =~= or =/= without asking first, a dotfiles repository in
+  your home folder included; markers in your home folder do not count
+- [X] In a repository: =claude-pair-project-root= =vc= (default),
+  =nearest-instructions=, =ask=, or your own function
+** Auto
+- [X] ERT: a repository, a monorepo subfolder on request (all three
+  styles and a function), the nearest marker, asking, never home, a
+  dotfiles repository, batch never waits, what is too wide (8 tests);
+  =make check= clean (182 ERT tests)
+- [X] Found and fixed on the way: the existing end-to-end tests started
+  chats in folders with no marker, so they were asked where to start and
+  the run hung; test projects now carry a marker, Emacs never waits in
+  batch, and =make test-lisp= runs with no input, so a question fails at
+  once
+** Interactive check run by Claude (terminal Emacs, real keys)
+- [X] From =proj/src/a.js= with =package.json= in =proj=: the chat
+  started in =proj=; from a folder with no marker: "No project found here;
+  start Claude in: …/loose/", =RET= took it
+** Visual gate (passed 21 Nov 2026, in your Doom Emacs)
+- [X] =C-c c P= in a file of a repository: the chat names the repository's
+  root, as before
+- [X] In a folder without git that has a marker (say a =package.json=):
+  that folder
+- [X] In a folder with nothing: you are asked; and from =~=, you are asked
+  before Claude gets your home folder
+
+* TODO M2 · Ask about any selection [0/3]
+- [ ] Select code anywhere (or nothing: the function at point) and
+  =@claude …=: "explain this", "add error handling here"
+- [ ] It goes to the project's chat with the file, line range and code
+- [ ] The answer also shows as a note above the selection, as for hunks
+
+* TODO M3 · Mentions in the chat [0/3]
+- [ ] Type =@= in the chat for completion: =@file= (project files),
+  =@buffer=, =@region= (the region you last had), =@diagnostics=
+- [ ] Each mention goes to Claude as context: a path to read, or the
+  text itself with its place
+- [ ] Mentions show as buttons in your message
+
+* TODO M4 · Claude sees what Emacs knows [0/4]
+- [ ] =diagnostics=: Flymake or Flycheck errors and warnings of a file
+- [ ] =xref=: definitions and references through Eglot or LSP, more
+  precise than grep
+- [ ] =imenu=: the outline of a file
+- [ ] =selection=: what you have selected and where you are; all
+  read-only, so they never ask
+
+* TODO M5 · Reopen earlier chats [0/3]
+- [ ] =M-x claude-pair-resume=: the project's earlier chats, with title,
+  age and cost
+- [ ] The chosen one reopens with its conversation drawn again, and goes
+  on where it stopped
+- [ ] Chats still running in the daemon reattach after an Emacs restart
+
+* TODO M6 · Slash commands [0/2]
+- [ ] Spike: which slash commands the headless =claude= runs (built-in and
+  your own in =.claude/commands/=)
+- [ ] Type =/= in the chat for completion; run them
+
+* TODO M7 · Checkpoints and rewind [0/3]
+- [ ] Spike: how far the headless =claude= can resume a conversation from
+  an earlier turn
+- [ ] Every turn is a checkpoint of the files Claude changed (Emacs knows
+  each change it applied)
+- [ ] =M-x claude-pair-rewind=: back to before turn N, files and
+  conversation
+
+* TODO M8 · Windows [0/3]
+- [ ] Local TCP with a token in a private file instead of a Unix socket
+- [ ] The daemon builds and its tests pass on Windows
+- [ ] CI on Windows (needs a GitHub remote)
+
+* TODO M9 · Phase 3 wrap-up [0/3]
+- [ ] README and protocol document
+- [ ] =make check= clean
+- [ ] Your sign-off

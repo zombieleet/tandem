@@ -49,6 +49,7 @@
 ;;; Code:
 
 (require 'claude-pair-layout)
+(require 'claude-pair-project)
 (require 'claude-pair-rpc)
 (require 'claude-pair-review)
 (require 'project)
@@ -217,12 +218,9 @@ Type after the prompt at the bottom and press \\[claude-pair-chat-send]."
 ;;;; Starting a chat
 
 (defun claude-pair-chat--project-root ()
-  "Return the current project's directory, or `default-directory'."
-  (directory-file-name
-   (expand-file-name
-    (if-let* ((project (project-current)))
-        (project-root project)
-      default-directory))))
+  "Return the folder for a chat about the current buffer.
+See `claude-pair-project-root'."
+  (claude-pair-project-root))
 
 (defun claude-pair-chat--claude-path ()
   "Return the absolute path of the claude command."

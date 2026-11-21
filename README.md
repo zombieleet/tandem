@@ -104,6 +104,27 @@ In the chat buffer, type after the `❯` prompt:
 The header line shows the model, what Claude is doing, and the session's cost
 so far. Each tool call is one line: `▸` while it runs, `✓` or `✗` when done.
 
+## Where Claude starts
+
+The folder a chat starts in is its project: Claude Code reads its
+instructions (`CLAUDE.md`) from there and every folder above, and Claude
+may change files only inside it.
+
+- In a repository: its root. With `claude-pair-project-root` set to
+  `nearest-instructions`, the nearest folder at or above the file, inside
+  the repository, with its own `CLAUDE.md`, `CLAUDE.local.md`,
+  `.claude/CLAUDE.md` or `AGENTS.md` (a package of a monorepo); with `ask`,
+  you choose between the two; or set it to a function of your own.
+- Not in a repository: the nearest folder upwards holding one of
+  `claude-pair-project-markers` (`CLAUDE.md`, `AGENTS.md`, `.claude/`,
+  `package.json`, `go.mod`, `pyproject.toml`, `Cargo.toml`, `Makefile`, …),
+  stopping before your home folder.
+- Nothing found: you are asked, with the file's folder as the default.
+
+Your home folder or `/` is never used without asking you first, since
+Claude could then read and change every file there; a dotfiles repository
+in your home folder asks too.
+
 ## Reviewing edits
 
 Claude never writes your files behind your back. Each edit appears in the
@@ -285,6 +306,8 @@ likely to change:
 | `claude-pair-max-windows` | 5 | Most windows Claude's frame may have when Claude adds one |
 | `claude-pair-min-windows` | 2 | Fewest windows Claude leaves when it closes one |
 | `claude-pair-focus-guard-seconds` | 3 | How long after you use a window Claude leaves it alone |
+| `claude-pair-project-root` | `vc` | Where a chat starts in a repository: `vc`, `nearest-instructions`, `ask`, or a function |
+| `claude-pair-project-markers` | `CLAUDE.md`, `package.json`, … | What marks a project's root outside a repository |
 | `claude-pair-review-style` | `blocking` | How Claude's edits wait for you: `blocking`, `deferred`, `auto-accept` |
 | `claude-pair-review-autosave` | t | Save a buffer after applying Claude's edit, if it had no unsaved changes of yours |
 | `claude-pair-review-merge-gap` | 2 | Unchanged lines between two changes up to which they make one hunk |
