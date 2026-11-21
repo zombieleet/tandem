@@ -314,6 +314,48 @@ func (d *Daemon) handle(ctx context.Context, c *client, method string, params js
 			return nil, rpc.Errorf(protocol.ClaudeUnavailable, "%s", err.Error())
 		}
 		return map[string]any{"commands": commands}, nil
+	case "session/history":
+		var id string
+		e, err := d.lookup(params, &id)
+		if err != nil {
+			return nil, err
+		}
+		entries, err := d.history(e, id, params)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"history": entries}, nil
+	case "session/rewind":
+		var p struct {
+			Before string `json:"before"`
+		}
+		var id string
+		e, err := d.lookup(params, &id)
+		if err != nil {
+			return nil, err
+		}
+		if json.Unmarshal(params, &p) != nil || p.Before == "" {
+			return nil, rpc.Errorf(protocol.InvalidParams, "session/rewind needs before, the message to go back to")
+		}
+		entries, err := d.history(e, id, params)
+		if err != nil {
+			return nil, err
+		}
+		known := false
+		for _, entry := range entries {
+			known = known || entry.Before == p.Before
+		}
+		if !known {
+			return nil, rpc.Errorf(protocol.InvalidParams, "%s is not a point this conversation can go back to", p.Before)
+		}
+		d.withdrawPermissions(id, "The user went back to an earlier turn.")
+		if err := e.s.Rewind(p.Before); err != nil {
+			if errors.Is(err, session.ErrBusy) {
+				return nil, rpc.Errorf(protocol.SessionBusy, "%s", err.Error())
+			}
+			return nil, rpc.Errorf(protocol.UnknownSession, "%s", err.Error())
+		}
+		return map[string]bool{"ok": true}, nil
 	case "session/cancel":
 		var id string
 		e, err := d.lookup(params, &id)
@@ -446,6 +488,28 @@ func (d *Daemon) startSession(c *client, id string, p *sessionParams, resume boo
 	d.mu.Lock()
 	d.sessions[id] = &sessionEntry{s: s, subs: map[*client]bool{c: true}}
 	d.mu.Unlock()
+}
+
+// history reads the conversation of session id, entry e, with tool titles.
+// params may carry env, for CLAUDE_CONFIG_DIR.
+func (d *Daemon) history(e *sessionEntry, id string, params json.RawMessage) ([]history.Entry, error) {
+	var p struct {
+		Env map[string]*string `json:"env"`
+	}
+	_ = json.Unmarshal(params, &p)
+	entries, err := history.Read(history.ConfigDir(p.Env), e.s.Cwd(), id)
+	if errors.Is(err, history.ErrNoChat) {
+		return []history.Entry{}, nil
+	}
+	if err != nil {
+		return nil, rpc.Errorf(protocol.InternalError, "reading the conversation: %s", err.Error())
+	}
+	for i := range entries {
+		if entries[i].Kind == "tool" {
+			entries[i].Title = session.ToolTitle(entries[i].Name, entries[i].Input, e.s.Cwd())
+		}
+	}
+	return entries, nil
 }
 
 // listSessions returns the earlier conversations about a project, newest

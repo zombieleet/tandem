@@ -54,7 +54,8 @@
 (defconst claude-pair-slash--own
   '((:name "clear" :description "Start a new chat; this one stays in claude-pair-resume"
            :aliases ["reset" "new"])
-    (:name "resume" :description "Reopen an earlier chat about this project"))
+    (:name "resume" :description "Reopen an earlier chat about this project")
+    (:name "rewind" :description "Go back to before one of your messages: files and conversation"))
   "Commands claude-pair runs itself.")
 
 (defun claude-pair-slash-refresh (&optional buffer)
@@ -146,7 +147,10 @@ keep typing.  Nothing happens without a connection to the daemon."
   (when (string-match "\\`/\\([[:alnum:]_-]+\\)\\(?:[ \t\n]\\|\\'\\)" text)
     (pcase (match-string 1 text)
       ((or "clear" "reset" "new") (claude-pair-slash--clear) t)
-      ("resume" (call-interactively #'claude-pair-resume) t))))
+      ("resume"
+       (when (derived-mode-p 'claude-pair-chat-mode) (claude-pair-chat--set-input ""))
+       (call-interactively #'claude-pair-resume)
+       t))))
 
 (defun claude-pair-slash--setup ()
   "Set up slash commands in a chat buffer."

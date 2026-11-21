@@ -40,8 +40,14 @@ type Entry struct {
 	// Title describes a tool call, filled in by the caller.
 	Title string `json:"title,omitempty"`
 	// Error is true for a tool call that failed.
-	Error bool   `json:"error,omitempty"`
-	id    string // tool_use id, to match its result
+	Error bool `json:"error,omitempty"`
+	// Before, for a user message, is the last message of Claude's before
+	// it, where `claude --resume-session-at` goes back to before this
+	// message, and BeforeTime when Claude wrote it. Both are empty for the
+	// first message.
+	Before     string `json:"before,omitempty"`
+	BeforeTime string `json:"beforeTime,omitempty"`
+	id         string // tool_use id, to match its result
 }
 
 // ErrNoChat is returned for a session with no conversation on disk.
@@ -83,14 +89,19 @@ func ProjectDir(configDir, cwd string) string {
 
 // record is the part of a transcript line this package reads.
 type record struct {
-	Type        string  `json:"type"`
-	Cwd         string  `json:"cwd"`
-	IsSidechain bool    `json:"isSidechain"`
-	IsMeta      bool    `json:"isMeta"`
-	AITitle     string  `json:"aiTitle"`
-	CustomTitle string  `json:"customTitle"`
-	TotalCost   float64 `json:"totalCostUSD"`
-	Message     struct {
+	UUID              string  `json:"uuid"`
+	ParentUUID        string  `json:"parentUuid"`
+	LogicalParentUUID string  `json:"logicalParentUuid"`
+	Timestamp         string  `json:"timestamp"`
+	IsCompactSummary  bool    `json:"isCompactSummary"`
+	Type              string  `json:"type"`
+	Cwd               string  `json:"cwd"`
+	IsSidechain       bool    `json:"isSidechain"`
+	IsMeta            bool    `json:"isMeta"`
+	AITitle           string  `json:"aiTitle"`
+	CustomTitle       string  `json:"customTitle"`
+	TotalCost         float64 `json:"totalCostUSD"`
+	Message           struct {
 		ID      string          `json:"id"`
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
@@ -107,14 +118,11 @@ type block struct {
 	Content json.RawMessage `json:"content"`
 }
 
-// interesting holds the record types worth decoding; others, some of them
-// large, are skipped without parsing.
-var interesting = [][]byte{
-	[]byte(`"type":"user"`), []byte(`"type":"assistant"`), []byte(`"type":"ai-title"`),
-	[]byte(`"type":"custom-title"`), []byte(`"type":"cost-state"`),
-}
+// skipped holds record types that are never read: copies of API
+// requests, some of them large.
+var skipped = [][]byte{[]byte(`"type":"api-request`)}
 
-// eachRecord calls fn for every interesting record of the file at path.
+// eachRecord calls fn for every record of the file at path that is read.
 func eachRecord(path string, fn func(*record)) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -140,18 +148,54 @@ func eachRecord(path string, fn func(*record)) error {
 }
 
 func wanted(line []byte) bool {
-	for _, t := range interesting {
+	for _, t := range skipped {
 		if bytes.Contains(line, t) {
-			return true
+			return false
 		}
 	}
-	return false
+	return true
+}
+
+// load returns the records of the file at path, in order, and the set of
+// UUIDs on the branch the conversation is on now: from its newest message
+// back to the first. Going back with --resume-session-at leaves the turns
+// after that point on a branch of their own, which this leaves out.
+func load(path string) ([]*record, map[string]bool, error) {
+	var records []*record
+	byID := map[string]*record{}
+	var leaf *record
+	err := eachRecord(path, func(rec *record) {
+		r := *rec
+		records = append(records, &r)
+		if r.UUID != "" {
+			byID[r.UUID] = &r
+			if r.Type == "user" || r.Type == "assistant" {
+				leaf = &r
+			}
+		}
+	})
+	branch := map[string]bool{}
+	for r := leaf; r != nil && !branch[r.UUID]; {
+		branch[r.UUID] = true
+		parent := r.ParentUUID
+		if parent == "" {
+			// Compacting starts a new chain that names the old one.
+			parent = r.LogicalParentUUID
+		}
+		r = byID[parent]
+	}
+	return records, branch, err
+}
+
+// onBranch reports whether rec is part of the conversation as it is now.
+func onBranch(rec *record, branch map[string]bool) bool {
+	return rec.UUID == "" || branch[rec.UUID]
 }
 
 // userText returns the words of a user record, or "" for a tool result or
 // a message Claude Code added itself.
 func userText(rec *record) string {
-	if rec.IsMeta || rec.IsSidechain {
+	if rec.IsMeta || rec.IsSidechain || rec.IsCompactSummary {
 		return ""
 	}
 	var s string
@@ -214,7 +258,11 @@ func List(configDir, cwd string, limit int) ([]Chat, error) {
 		c := Chat{SessionID: f.id, Modified: f.mod}
 		var first, aiTitle, custom string
 		foreign := false
-		_ = eachRecord(filepath.Join(dir, f.id+".jsonl"), func(rec *record) {
+		records, branch, _ := load(filepath.Join(dir, f.id+".jsonl"))
+		for _, rec := range records {
+			if !onBranch(rec, branch) {
+				continue
+			}
 			switch rec.Type {
 			case "user":
 				if rec.Cwd != "" && rec.Cwd != cwd {
@@ -233,7 +281,7 @@ func List(configDir, cwd string, limit int) ([]Chat, error) {
 			case "cost-state":
 				c.CostUSD = rec.TotalCost
 			}
-		})
+		}
 		if c.Prompts == 0 || foreign {
 			continue
 		}
@@ -256,16 +304,22 @@ func Read(configDir, cwd, id string) ([]Entry, error) {
 	entries := []Entry{}
 	tools := map[string]int{}
 	lastMsg := ""
-	err := eachRecord(path, func(rec *record) {
-		if rec.IsSidechain {
-			return
+	var lastClaude *record
+	records, branch, err := load(path)
+	for _, rec := range records {
+		if rec.IsSidechain || !onBranch(rec, branch) {
+			continue
 		}
 		switch rec.Type {
 		case "user":
 			if t := userText(rec); !added(t) {
-				entries = append(entries, Entry{Kind: "user", Text: t})
+				e := Entry{Kind: "user", Text: t}
+				if lastClaude != nil {
+					e.Before, e.BeforeTime = lastClaude.UUID, lastClaude.Timestamp
+				}
+				entries = append(entries, e)
 				lastMsg = ""
-				return
+				continue
 			}
 			var blocks []block
 			if json.Unmarshal(rec.Message.Content, &blocks) == nil {
@@ -276,9 +330,10 @@ func Read(configDir, cwd, id string) ([]Entry, error) {
 				}
 			}
 		case "assistant":
+			lastClaude = rec
 			var blocks []block
 			if json.Unmarshal(rec.Message.Content, &blocks) != nil {
-				return
+				continue
 			}
 			for _, b := range blocks {
 				switch b.Type {
@@ -300,7 +355,7 @@ func Read(configDir, cwd, id string) ([]Entry, error) {
 			}
 			lastMsg = rec.Message.ID
 		}
-	})
+	}
 	return entries, err
 }
 

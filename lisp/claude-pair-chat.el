@@ -167,6 +167,9 @@ without being repeated.  Empty for none."
 (defvar-local claude-pair-chat--tools nil "Map from tool call id to the marker of its status mark.")
 (defvar-local claude-pair-chat--replying nil "Non-nil once Claude's answer to the last message has begun.")
 
+(defvar-local claude-pair-chat--turn-started nil
+  "When the running or last turn began, as from `float-time', or nil.")
+
 (defvar-local claude-pair-chat--markdown-start nil
   "Marker where Claude's text not yet rendered as Markdown begins, or nil.")
 (defvar-local claude-pair-chat--after-tool nil "Non-nil when the transcript ends with a tool line.")
@@ -193,7 +196,7 @@ run in the chat buffer.")
 (defvar claude-pair-chat-send-functions nil
   "Functions that may handle a message you send, instead of Claude.
 Each gets the text; the first that returns non-nil has handled it, and
-nothing goes to Claude.")
+nothing goes to Claude.  One that handles it empties the composer.")
 
 (defvar claude-pair-chat-session-functions nil
   "Functions called with a chat buffer whose session has just started or reopened.")
@@ -422,9 +425,7 @@ always start a new session.  To reopen an older chat, use
   (let ((text (string-trim (claude-pair-chat--input-text))))
     (when (string-empty-p text)
       (user-error "Type a message after the prompt first"))
-    (if (run-hook-with-args-until-success 'claude-pair-chat-send-functions text)
-        (when (buffer-live-p (current-buffer))
-          (claude-pair-chat--set-input ""))
+    (unless (run-hook-with-args-until-success 'claude-pair-chat-send-functions text)
       (claude-pair-chat--send-to-claude text))))
 
 (defun claude-pair-chat--send-to-claude (text)
@@ -440,7 +441,8 @@ always start a new session.  To reopen an older chat, use
                              (length claude-pair-chat--review-results)
                              (if (cdr claude-pair-chat--review-results) "s" "")))))
     (claude-pair-chat--flush)
-    (setq claude-pair-chat--state "starting")
+    (setq claude-pair-chat--state "starting"
+          claude-pair-chat--turn-started (float-time))
     (if (condition-case err
             (progn
               (claude-pair-rpc-request 'session/prompt

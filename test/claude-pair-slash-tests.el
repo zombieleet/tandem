@@ -31,7 +31,7 @@
         (should (equal (buffer-substring-no-properties (nth 0 capf) (nth 1 capf)) "gr"))
         (let ((all (all-completions "" (nth 2 capf))))
           ;; claude-pair's own first; /clear once.
-          (should (equal all '("clear" "resume" "compact" "greet"))))
+          (should (equal all '("clear" "resume" "rewind" "compact" "greet"))))
         (should (equal (funcall (plist-get (nthcdr 3 capf) :annotation-function) "greet")
                        " NAME   Greet someone by name (project)"))
         (should (string-match-p "this one stays in claude-pair-resume"

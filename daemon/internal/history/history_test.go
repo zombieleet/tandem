@@ -127,3 +127,38 @@ func TestAChatFromAnotherFolderWithTheSameDirectoryIsLeftOut(t *testing.T) {
 		t.Fatalf("chats %+v", chats)
 	}
 }
+
+func TestOnlyTheCurrentBranch(t *testing.T) {
+	cfg := t.TempDir()
+	cwd := "/work/geo"
+	write(t, ProjectDir(cfg, cwd), idA,
+		`{"type":"user","uuid":"u1","cwd":"/work/geo","timestamp":"T1","message":{"content":"Remember APPLE"}}`,
+		`{"type":"attachment","uuid":"x1","parentUuid":"u1"}`,
+		`{"type":"assistant","uuid":"a1","parentUuid":"x1","timestamp":"T2","message":{"id":"m1","content":[{"type":"text","text":"OK"}]}}`,
+		`{"type":"user","uuid":"u2","parentUuid":"a1","cwd":"/work/geo","message":{"content":"Remember BANANA"}}`,
+		`{"type":"assistant","uuid":"a2","parentUuid":"u2","timestamp":"T4","message":{"id":"m2","content":[{"type":"text","text":"OK too"}]}}`,
+		// Rewound to after a1: a new branch.
+		`{"type":"user","uuid":"u3","parentUuid":"a1","cwd":"/work/geo","message":{"content":"Which words?"}}`,
+		`{"type":"assistant","uuid":"a3","parentUuid":"u3","timestamp":"T6","message":{"id":"m3","content":[{"type":"text","text":"APPLE"}]}}`,
+		// Compacted: a new chain that names the old one, and its summary.
+		`{"type":"system","subtype":"compact_boundary","uuid":"c1","parentUuid":null,"logicalParentUuid":"a3"}`,
+		`{"type":"user","uuid":"s1","parentUuid":"c1","isCompactSummary":true,"cwd":"/work/geo","message":{"content":"This session is being continued"}}`,
+		`{"type":"user","uuid":"u4","parentUuid":"s1","cwd":"/work/geo","message":{"content":"And now?"}}`,
+	)
+	entries, err := Read(cfg, cwd, idA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range entries {
+		got = append(got, e.Kind+":"+e.Text+"<"+e.Before+"@"+e.BeforeTime)
+	}
+	want := []string{"user:Remember APPLE<@", "text:OK<@", "user:Which words?<a1@T2", "text:APPLE<@", "user:And now?<a3@T6"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("entries\n got %q\nwant %q", got, want)
+	}
+	chats, _ := List(cfg, cwd, 5)
+	if len(chats) != 1 || chats[0].Prompts != 3 {
+		t.Fatalf("chats %+v", chats)
+	}
+}

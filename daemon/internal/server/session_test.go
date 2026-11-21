@@ -402,3 +402,51 @@ func TestSlashCommands(t *testing.T) {
 		t.Fatalf("text %q", got)
 	}
 }
+
+func TestRewindToAnEarlierTurn(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	argsLog := filepath.Join(t.TempDir(), "args")
+	t.Setenv("FAKE_CLAUDE_ARGS_LOG", argsLog)
+	d := startDaemon(t, 0, "cpd-")
+	c := ready(t, d)
+	id := createSession(t, c, fakeClaude)
+	for _, text := range []string{"one", "two"} {
+		prompt(t, c, id, text)
+		c.untilIdle(id)
+	}
+	type entry struct{ Kind, Text, Before, BeforeTime string }
+	history := func() []entry {
+		m := c.request("session/history", map[string]string{"sessionId": id})
+		wantOK(t, m)
+		var r struct{ History []entry }
+		json.Unmarshal(m.Result, &r)
+		return r.History
+	}
+	h := history()
+	if len(h) != 4 || h[0].Text != "one" || h[0].Before != "" || h[2].Text != "two" || h[2].Before == "" || h[2].BeforeTime == "" {
+		t.Fatalf("history %+v", h)
+	}
+	before := h[2].Before
+	wantCode(t, c.request("session/rewind", map[string]string{"sessionId": id, "before": "nope"}), protocol.InvalidParams)
+	wantOK(t, c.request("session/rewind", map[string]string{"sessionId": id, "before": before}))
+
+	// "two" is forgotten; the next start goes back, the one after follows.
+	prompt(t, c, id, "three")
+	c.untilIdle(id)
+	h = history()
+	var texts []string
+	for _, e := range h {
+		if e.Kind == "user" {
+			texts = append(texts, e.Text)
+		}
+	}
+	if strings.Join(texts, ",") != "one,three" {
+		t.Fatalf("after rewind %+v", h)
+	}
+	wantOK(t, c.request("session/cancel", map[string]string{"sessionId": id}))
+	logged, _ := os.ReadFile(argsLog)
+	lines := strings.Split(strings.TrimSpace(string(logged)), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[1], "--resume "+id+" ") || !strings.HasSuffix(lines[1], "--resume-session-at "+before) {
+		t.Fatalf("starts:\n%s", logged)
+	}
+}

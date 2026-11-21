@@ -109,6 +109,10 @@ Claude what you decided; the sentence is a question when you asked one.")
 (defvar claude-pair-review-show-functions nil
   "Functions called with each proposal once it is shown in its buffer.")
 
+(defvar claude-pair-review-before-apply-functions nil
+  "Functions called with a proposal just before one of its hunks is applied.
+They run in the proposal's buffer, which still has its old text.")
+
 (defvar claude-pair-review-settle-functions nil
   "Functions called with each hunk once it is decided or withdrawn.")
 
@@ -345,6 +349,25 @@ the file, is dropped, and Claude hears it with the edit's outcome."
             ;; save ran this, finishes itself once it knows what was saved.
             (when dropped
               (claude-pair-review--maybe-finish proposal))))))))
+
+(defun claude-pair-review-own-text (buffer)
+  "Return BUFFER's text without the proposed text waiting for review in it.
+That is the text saving would write.  The buffer does not change."
+  (with-current-buffer buffer
+    (let ((ranges nil))
+      (dolist (proposal (claude-pair-review--in-buffer buffer))
+        (dolist (hunk (claude-pair-review--pending proposal))
+          (when-let* ((entry (claude-pair-review--hunk-entry hunk))
+                      ((< (nth 0 entry) (nth 1 entry))))
+            (push (cons (marker-position (nth 0 entry)) (marker-position (nth 1 entry))) ranges))))
+      (save-restriction
+        (widen)
+        (let ((pos (point-min)) (parts nil))
+          (dolist (range (sort ranges (lambda (a b) (< (car a) (car b)))))
+            (push (buffer-substring pos (car range)) parts)
+            (setq pos (cdr range)))
+          (push (buffer-substring pos (point-max)) parts)
+          (apply #'concat (nreverse parts)))))))
 
 (defun claude-pair-review--before-save ()
   "Take the proposed text out, so saving writes only your text."
@@ -722,6 +745,7 @@ With NO-SAVE, leave saving to the caller.  Return non-nil if applied."
     (let ((clean (not (buffer-modified-p)))
           (beg (claude-pair-review--hunk-beg hunk))
           (end (claude-pair-review--hunk-end hunk)))
+      (run-hook-with-args 'claude-pair-review-before-apply-functions proposal)
       (when-let* ((entry (claude-pair-review--hunk-entry hunk)))
         (claude-pair-review--hide-text entry))
       (cond

@@ -58,6 +58,10 @@ var (
 
 	callMu     sync.Mutex
 	callCancel context.CancelFunc
+
+	resumeAt     string // --resume-session-at
+	lastUUID     string // the transcript's newest record, the next one's parent
+	uuidsStarted bool
 )
 
 func main() {
@@ -83,6 +87,8 @@ func main() {
 		switch a {
 		case "--session-id", "--resume":
 			sessionID = args[i+1]
+		case "--resume-session-at":
+			resumeAt = args[i+1]
 		case "--mcp-config":
 			mcpConfig = args[i+1]
 		case "--permission-prompt-tool":
@@ -613,7 +619,8 @@ func toolResult(id, content string, isError bool) {
 	transcript(m)
 }
 
-// transcript adds rec to the conversation's file under CLAUDE_CONFIG_DIR.
+// transcript adds rec to the conversation's file under CLAUDE_CONFIG_DIR,
+// chained to the record before it, or to --resume-session-at's.
 func transcript(rec map[string]any) {
 	config := os.Getenv("CLAUDE_CONFIG_DIR")
 	if config == "" || sessionID == "" {
@@ -632,7 +639,29 @@ func transcript(rec map[string]any) {
 	if os.MkdirAll(path, 0o700) != nil {
 		return
 	}
-	f, err := os.OpenFile(filepath.Join(path, sessionID+".jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	file := filepath.Join(path, sessionID+".jsonl")
+	if !uuidsStarted {
+		uuidsStarted = true
+		if old, err := os.ReadFile(file); err == nil {
+			for _, l := range strings.Split(string(old), "\n") {
+				var r struct{ UUID string }
+				if json.Unmarshal([]byte(l), &r) == nil && r.UUID != "" {
+					lastUUID = r.UUID
+				}
+			}
+		}
+		if resumeAt != "" {
+			lastUUID = resumeAt
+		}
+	}
+	msgCounter++
+	id := fmt.Sprintf("%s-r%d-%d", sessionID[:8], os.Getpid(), msgCounter)
+	rec["uuid"], rec["timestamp"] = id, time.Now().UTC().Format(time.RFC3339Nano)
+	if lastUUID != "" {
+		rec["parentUuid"] = lastUUID
+	}
+	lastUUID = id
+	f, err := os.OpenFile(file, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return
 	}

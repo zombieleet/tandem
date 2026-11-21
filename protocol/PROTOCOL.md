@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.13.0**. This document is the contract between the Emacs client
+Version **0.14.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -150,10 +150,31 @@ about `cwd` with `-32004`.
 
 Result: `{sessionId, running, history}`, plus `busy` and `costUsd` for a
 running session, or `claudeVersion` for one registered again. `history`
-holds the conversation in order: `{kind: "user", text}` for the user's
-messages, `{kind: "text", text}` for Claude's words, `{kind: "tool", title,
+holds the conversation in order: `{kind: "user", text, before,
+beforeTime}` for the user's messages, where `before` is the UUID of
+Claude's last message before this one and `beforeTime` when it was
+written (both absent for the first message), `{kind: "text", text}` for Claude's words, `{kind: "tool", title,
 error}` for tool calls, with the titles of `tool_start` updates. Subagents'
-work, thinking and messages Claude Code adds itself are left out.
+work, thinking and messages Claude Code adds itself are left out. Claude
+Code keeps a conversation as a tree; only the branch it is on now, from
+its newest message back, is read, across compaction.
+
+### `session/history` (client → daemon)
+
+Params: `sessionId`, optional `env`. Result: `{history}`, the session's
+conversation so far as in `session/resume`.
+
+### `session/rewind` (client → daemon)
+
+Params: `sessionId`, `before` (the `before` of one of the user's messages
+in `session/history`), optional `env`. The session goes back to just after
+that message of Claude's: the running `claude` stops, and the next prompt
+starts `claude --resume <sessionId> --resume-session-at <before>`, so
+Claude forgets the user's message and everything after it. Later starts
+follow the new branch with a plain `--resume`. Fails with `-32602` for an
+unknown `before` and `-32003` during a turn. Files are the client's to
+restore: edits go through Emacs, not Claude Code's own file checkpoints.
+To go back to before the first message, a client starts a new session.
 
 ### `session/commands` (client → daemon)
 

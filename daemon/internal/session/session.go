@@ -92,6 +92,7 @@ type Session struct {
 	mu        sync.Mutex
 	proc      *process // the process that takes the next prompt, or nil
 	resumable bool     // a transcript exists, so later starts use --resume
+	resumeAt  string   // the message the next start goes back to, or ""
 	closed    bool
 	totalCost float64 // sum of completed turns, across processes
 }
@@ -210,6 +211,39 @@ func (s *Session) Cancel() bool {
 	return true
 }
 
+// Rewind goes back to just after Claude's message uuid: the turns after it
+// are forgotten, and the next prompt continues from there. The running
+// claude, which remembers them, stops. It fails with ErrBusy during a turn.
+func (s *Session) Rewind(uuid string) error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return ErrClosed
+	}
+	p := s.proc
+	if p != nil && p.turnOpen {
+		s.mu.Unlock()
+		return ErrBusy
+	}
+	s.proc, s.resumable, s.resumeAt = nil, true, uuid
+	if p != nil {
+		// An exit forced below is not a crash to report.
+		p.cancelling = true
+	}
+	s.mu.Unlock()
+	if p != nil {
+		_ = p.stdin.Close()
+		select {
+		case <-p.done:
+		case <-time.After(closeGrace):
+			_ = p.cmd.Process.Kill()
+			<-p.done
+		}
+	}
+	s.opts.Log.Info("session rewound", "to", uuid)
+	return nil
+}
+
 // Close stops claude and refuses further prompts. It waits for the process.
 func (s *Session) Close() {
 	s.mu.Lock()
@@ -266,7 +300,11 @@ func (s *Session) Args(resume bool) []string {
 		args = append(args, "--model", s.opts.Model)
 	}
 	if resume {
-		return append(args, "--resume", s.opts.ID)
+		args = append(args, "--resume", s.opts.ID)
+		if s.resumeAt != "" {
+			args = append(args, "--resume-session-at", s.resumeAt)
+		}
+		return args
 	}
 	return append(args, "--session-id", s.opts.ID)
 }
@@ -303,6 +341,8 @@ func (s *Session) startLocked() error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("cannot start claude: %w", err)
 	}
+	// Only the first start after a rewind goes back; later ones follow the new branch.
+	s.resumeAt = ""
 	p := &process{cmd: cmd, stdin: stdin, stderr: tail, done: make(chan struct{}),
 		streamed: map[string]bool{}, tools: map[string]toolStart{}}
 	s.proc = p

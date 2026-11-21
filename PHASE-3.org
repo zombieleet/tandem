@@ -227,13 +227,40 @@ starts.
 - [X] Add a command in =.claude/commands/=, =M-x claude-pair-slash-refresh=,
   complete and run it
 
-* TODO M7 · Checkpoints and rewind [0/3]
-- [ ] Spike: how far the headless =claude= can resume a conversation from
-  an earlier turn
-- [ ] Every turn is a checkpoint of the files Claude changed (Emacs knows
-  each change it applied)
-- [ ] =M-x claude-pair-rewind=: back to before turn N, files and
-  conversation
+* DONE M7 · Checkpoints and rewind [3/3]
+- [X] Spike (real =claude= 2.1.327): the hidden =--resume-session-at UUID=
+  with =--resume= goes back to just after one of Claude's messages, in the
+  same session ID; Claude then remembered only the earlier word. The
+  transcript becomes a tree (=parentUuid=); a later plain =--resume=
+  follows the new branch. Claude Code's own =rewind_files= does not cover
+  edits made through Emacs, so Emacs keeps the file checkpoints
+- [X] Every turn is a checkpoint: just before Emacs applies Claude's first
+  change to a file in a turn, it keeps the file's text (without proposed
+  text waiting for review, with its authorship), or notes a file Claude
+  creates
+- [X] =M-x claude-pair-rewind= and =/rewind=: pick one of your messages;
+  the files go back (one undo step each; created files deleted), Claude
+  forgets the message and all after it (=session/rewind=), the chat is
+  drawn again up to there and the message is back in the composer. Before
+  the first message: a new chat. Turns are matched by time, so slash
+  commands in between do not matter (protocol 0.14.0, =session/history=)
+** Auto
+- [X] Go: only the current branch of a transcript, across compaction;
+  rewind points; rewind through the daemon with =--resume-session-at= once,
+  then a plain =--resume=; unknown points refused. ERT: files and
+  conversation back to before message 2 (an edit undone, a created file
+  deleted, the message in the composer, Claude going on); before the first
+  message; =/rewind=; one checkpoint per file and turn (4 tests). =make
+  check= clean (228 ERT tests)
+** Live check run by Claude (21 Nov 2026, Haiku, about $0.03)
+- [X] PELICAN, then an edit of a.py (=x = 2=), then KIWI; =/rewind= to
+  before message 2: a.py back to =x = 1=, the message in the composer;
+  asked for the words: "PELICAN"
+** Visual gate (your turn)
+- [X] In a scratch project: ask for an edit and apply it, then another
+  message; =/rewind=, pick the edit's message: the file goes back, the chat
+  shows the turns before it, your message is in the composer
+- [X] =C-/= in the file buffer takes the rewind back
 
 * TODO M8 · Windows [0/3]
 - [ ] Local TCP with a token in a private file instead of a Unix socket

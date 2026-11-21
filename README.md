@@ -285,6 +285,22 @@ edit proposal or permission question comes to you, since Claude is waiting
 for you, except when you are in another tab than Claude's: then your tab is
 left alone and the echo area tells you to switch (`C-x t o`).
 
+## Going back to an earlier turn
+
+Every turn is a checkpoint. `M-x claude-pair-rewind`, or `/rewind` in the
+chat, asks which of your messages to go back to before. Then:
+
+- the files Claude changed in Emacs from then on go back to how they
+  were, including your own later changes to them, as one step `undo` can
+  take back in each buffer; a file Claude created is deleted;
+- Claude forgets that message and everything after it;
+- the chat shows the conversation up to there, and your message is back
+  in the composer, to change and send again.
+
+Checkpoints live in this Emacs: after Emacs restarts, a rewind takes back
+the conversation only. Changes Claude made with shell commands are never
+taken back.
+
 ## Slash commands
 
 Type `/` at the start of a message and complete a command with
@@ -295,7 +311,8 @@ You get Claude Code's own commands (`/compact`, `/context`, `/usage`,
 They run as Claude Code runs them.
 
 `/clear` (or `/reset`, `/new`) starts a new chat, and the old one stays in
-`M-x claude-pair-resume`. `/resume` reopens an earlier chat. After you add
+`M-x claude-pair-resume`. `/resume` reopens an earlier chat, and `/rewind`
+goes back to an earlier turn. After you add
 a command, `M-x claude-pair-slash-refresh` reads the list again.
 
 ## Reopening earlier chats

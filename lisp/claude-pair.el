@@ -49,6 +49,7 @@
 (require 'claude-pair-tools)
 (require 'claude-pair-resume)
 (require 'claude-pair-slash)
+(require 'claude-pair-rewind)
 
 ;;;###autoload
 (defun claude-pair-connect ()
