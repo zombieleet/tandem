@@ -456,3 +456,40 @@ func TestRewindToAnEarlierTurn(t *testing.T) {
 		t.Fatalf("starts:\n%s", logged)
 	}
 }
+
+func TestAllSessions(t *testing.T) {
+	d := startDaemon(t, 0, "cpd-")
+	c := ready(t, d)
+	a := createSession(t, c, fakeClaude)
+	b := createSession(t, c, fakeClaude)
+	prompt(t, c, a, "script:hello")
+	c.untilIdle(a)
+	m := c.request("session/all", nil)
+	wantOK(t, m)
+	var r struct {
+		Sessions []struct {
+			SessionID, Cwd string
+			Busy           bool
+			CostUSD        float64 `json:"costUsd"`
+			Followers      int
+		}
+	}
+	json.Unmarshal(m.Result, &r)
+	if len(r.Sessions) != 2 {
+		t.Fatalf("sessions %+v", r.Sessions)
+	}
+	for _, s := range r.Sessions {
+		if s.Cwd == "" || s.Busy || s.Followers != 1 {
+			t.Fatalf("session %+v", s)
+		}
+		if s.SessionID == a && s.CostUSD == 0 {
+			t.Fatalf("no cost for the session that ran: %+v", s)
+		}
+		if s.SessionID != a && s.SessionID != b {
+			t.Fatalf("unknown session %+v", s)
+		}
+	}
+	// A second Emacs follows none of them.
+	c2 := ready(t, d)
+	wantOK(t, c2.request("session/all", nil))
+}

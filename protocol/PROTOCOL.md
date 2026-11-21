@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.16.0**. This document is the contract between the Emacs client
+Version **0.17.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -168,6 +168,12 @@ error}` for tool calls, with the titles of `tool_start` updates. Subagents'
 work, thinking and messages Claude Code adds itself are left out. Claude
 Code keeps a conversation as a tree; only the branch it is on now, from
 its newest message back, is read, across compaction.
+
+### `session/all` (client → daemon)
+
+No params. Result: `{sessions: [{sessionId, cwd, busy, costUsd,
+followers}]}`, every session open in this daemon, whatever its project,
+sorted by `cwd`; `followers` counts the Emacs clients that follow it.
 
 ### `session/history` (client → daemon)
 

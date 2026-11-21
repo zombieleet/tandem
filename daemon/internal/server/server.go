@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -360,6 +361,8 @@ func (d *Daemon) handle(ctx context.Context, c *client, method string, params js
 		return d.newSession(c, params)
 	case "session/list":
 		return d.listSessions(params)
+	case "session/all":
+		return d.allSessions(), nil
 	case "session/resume":
 		return d.resumeSession(c, params)
 	case "session/prompt":
@@ -574,6 +577,45 @@ func (d *Daemon) history(e *sessionEntry, id string, params json.RawMessage) ([]
 		}
 	}
 	return entries, nil
+}
+
+// allSessions lists every session open in this daemon, whatever its
+// project: the dashboard shows the ones no Emacs window has.
+func (d *Daemon) allSessions() any {
+	type open struct {
+		SessionID string  `json:"sessionId"`
+		Cwd       string  `json:"cwd"`
+		Busy      bool    `json:"busy"`
+		CostUSD   float64 `json:"costUsd"`
+		Followers int     `json:"followers"`
+	}
+	d.mu.Lock()
+	entries := map[string]*sessionEntry{}
+	out := make([]open, 0, len(d.sessions))
+	for id, e := range d.sessions {
+		followers := 0
+		for c := range e.subs {
+			select {
+			case <-c.conn.Done():
+			default:
+				if !c.helper() {
+					followers++
+				}
+			}
+		}
+		entries[id] = e
+		out = append(out, open{SessionID: id, Cwd: e.s.Cwd(), Followers: followers})
+	}
+	d.mu.Unlock()
+	// Busy and cost take the session's own lock, so outside the daemon's.
+	for i := range out {
+		e := entries[out[i].SessionID]
+		out[i].Busy, out[i].CostUSD = e.s.Busy(), e.s.TotalCostUSD()
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Cwd < out[j].Cwd || out[i].Cwd == out[j].Cwd && out[i].SessionID < out[j].SessionID
+	})
+	return map[string]any{"sessions": out}
 }
 
 // listSessions returns the earlier conversations about a project, newest

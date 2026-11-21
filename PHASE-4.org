@@ -101,9 +101,30 @@ work across worktrees and machines, then evil keys for others.
 - [X] In a Vertico list of files, or on a symbol, =C-.= (Embark) then =@=:
   asks Claude
 
-* TODO M3 · Several agents at once [0/2]
-- [ ] One chat per git worktree; a command makes a worktree and its chat
-- [ ] A dashboard of every chat: status, cost, hunks waiting, worktree
+* DONE M3 · Several agents at once [2/2]
+- [X] One chat per git worktree: each worktree is a project with its own
+  chat. =claude-pair-worktree NAME= runs =git worktree add -b NAME= next
+  to the repository (=claude-pair-worktree-directory=, by default
+  =<repo>.worktrees/<name>=; an existing branch is checked out instead)
+  and opens its chat; =claude-pair-worktree-remove= removes one, refusing
+  uncommitted changes unless =C-u=, and closes its chat; the branch stays
+- [X] =claude-pair-chats=: every chat with project, branch, what Claude
+  does, hunks and questions waiting, cost, folder; refreshed every second
+  while shown; =RET= opens, =k= closes, =w= makes a worktree, =D= removes
+  one, =r= lists waiting hunks. Chats open only in the daemon (an Emacs
+  restart, another Emacs) are listed from the new =session/all= (protocol
+  0.17.0), and =RET= reattaches them
+** Auto
+- [X] Go: =session/all= lists every session with cost and followers. ERT
+  (4): a worktree with its own chat, both on the dashboard with their
+  branches, removing it; a chat only in the daemon, reattached from the
+  dashboard; the dashboard buffer and its timer; names git refuses.
+  =make check= clean. Screenshot of the dashboard with two chats
+** Visual gate (your turn)
+- [X] In =badger=: =M-x claude-pair-worktree= =try-something=: a new
+  worktree next to it, and its chat opens; ask it something
+- [X] =M-x claude-pair-chats=: both chats, with branches, states and costs;
+  =RET= opens one; =D= on the worktree removes it
 
 * TODO M4 · Authorship in git notes [0/2]
 - [ ] On commit, Claude's lines go into =refs/notes/claude-pair=

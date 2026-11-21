@@ -91,6 +91,8 @@ emacs -Q -L ~/src/claude-pair/lisp --eval "(require 'claude-pair)"
 | `M-x claude-pair` | Chat with Claude about the current project; reattaches a chat still open in the daemon (`C-u` starts a new one) |
 | `M-x claude-pair-resume` | Reopen an earlier chat about the project, with its conversation |
 | `M-x claude-pair-rewind` | Go back to before one of your messages: files and conversation |
+| `M-x claude-pair-chats` | Every chat: project, branch, state, what waits, cost |
+| `M-x claude-pair-worktree` | Make a git worktree on a new branch, with its own chat |
 | `M-x claude-pair-plan` | Give Claude a task to plan first; you edit the plan in Org (`/plan` in the chat) |
 | `M-x claude-pair-org-send-subtree` | Send the Org subtree at point as a task; the answer goes under it |
 | `M-x claude-pair-ask` | Ask Claude about the region, or the function or line at point (`@claude …`) |
@@ -297,6 +299,23 @@ Edit proposals open by the same rules. When the chat is not shown, an
 edit proposal or permission question comes to you, since Claude is waiting
 for you, except when you are in another tab than Claude's: then your tab is
 left alone and the echo area tells you to switch (`C-x t o`).
+
+## Several chats at once
+
+Several Claudes can work at once, each in its own git worktree, so their
+edits never meet. A worktree is a project of its own, with its own chat.
+
+- `M-x claude-pair-worktree` makes a worktree on a new branch, next to the
+  repository (`claude-pair-worktree-directory`, by default
+  `<repo>.worktrees/<name>`), and opens its chat.
+- `M-x claude-pair-chats` lists every chat: project, branch, what Claude
+  is doing, what waits for you, the cost. It refreshes itself while shown.
+  `RET` opens a chat, `k` closes one, `w` makes a worktree, `D` removes
+  one, `r` lists the hunks waiting. Chats still open in the daemon but
+  not in this Emacs are listed too, and `RET` reattaches them.
+- `M-x claude-pair-worktree-remove` removes a worktree (refusing one with
+  changes not committed, unless `C-u`) and closes its chat; its branch
+  stays.
 
 ## Plans you edit in Org
 
