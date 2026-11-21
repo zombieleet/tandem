@@ -169,10 +169,17 @@ A proposal has :id, :buffer, :path, :kind, :session, :new-file and
   "Face for a question you asked Claude about a hunk, and its answer."
   :group 'claude-pair)
 
-(defcustom claude-pair-review-note-lines 6
-  "Lines of Claude's answer a note shows; the chat has all of it."
+(defcustom claude-pair-review-note-lines 3
+  "Lines of Claude's answer a folded note shows.
+Notes start unfolded, with the whole answer; [fold] folds one."
   :type 'natnum
   :group 'claude-pair)
+
+(defvar-keymap claude-pair-review-note-fold-map
+  :doc "Mouse keys on a note's fold button."
+  "<down-mouse-1>" #'ignore
+  "<mouse-1>" #'claude-pair-review-click-fold
+  "<drag-mouse-1>" #'claude-pair-review-click-fold)
 
 (defvar claude-pair-review--notes (make-hash-table :test #'equal)
   "Map from edit request id to the note of the question asked about it.
@@ -1038,46 +1045,127 @@ propose them again.  Its answer shows as a note where the hunk was."
 
 ;;;; Notes: a question about a hunk, and Claude's answer
 
+(defun claude-pair-review--wrap (lines width)
+  "Return LINES with lines wider than WIDTH broken at spaces.
+Lines inside code fences stay as they are."
+  (let ((in-code nil) out)
+    (dolist (line lines)
+      (cond
+       ((string-match-p "\\`\\s-*```" line)
+        (setq in-code (not in-code))
+        (push line out))
+       ((or in-code (<= (string-width line) width))
+        (push line out))
+       (t
+        (let ((indent (if (string-match "\\`\\s-*\\(?:[-*] \\|[0-9]+\\. \\)?" line)
+                          (make-string (string-width (match-string 0 line)) ?\s)
+                        ""))
+              (rest line)
+              (first t))
+          (while (> (string-width rest) width)
+            (let* ((cut (or (and (string-match ".*\\( \\)" (substring rest 0 width))
+                                 (match-beginning 1))
+                            width)))
+              (push (substring rest 0 cut) out)
+              (setq rest (concat indent (string-trim-left (substring rest cut)))
+                    first nil)))
+          (ignore first)
+          (push rest out)))))
+    (nreverse out)))
+
+(defun claude-pair-review--note-width (overlay)
+  "Return how wide the note in OVERLAY may be."
+  (let ((window (and (overlay-buffer overlay) (get-buffer-window (overlay-buffer overlay) t))))
+    (max 40 (- (if window (window-body-width window) 80) 3))))
+
 (defun claude-pair-review--note-text (id)
   "Return the lines of the note for edit ID."
   (let* ((note (gethash id claude-pair-review--notes))
          (bar (propertize "┃ " 'face 'claude-pair-review-note))
          (answer (string-trim (or (plist-get note :answer) "")))
-         (lines (if (string-empty-p answer) nil (split-string answer "\n")))
-         (shown (seq-take lines claude-pair-review-note-lines))
-         (close (propertize "[×]" 'keymap claude-pair-review-note-button-map
-                            'mouse-face 'highlight 'claude-pair-note id
-                            'help-echo "mouse-1: dismiss this note")))
+         (folded (plist-get note :folded))
+         (lines (if (string-empty-p answer) nil
+                  (claude-pair-review--wrap
+                   (split-string (concat "Claude: " answer) "\n")
+                   (claude-pair-review--note-width (plist-get note :overlay)))))
+         (shown (if folded (seq-take lines claude-pair-review-note-lines) lines))
+         (button (lambda (label map help)
+                   (propertize label 'keymap map 'mouse-face 'highlight 'claude-pair-note id
+                               'help-echo help)))
+         (fold (and (> (length lines) claude-pair-review-note-lines)
+                    (funcall button (if folded "[unfold]" "[fold]") claude-pair-review-note-fold-map
+                             (if folded "mouse-1: show the whole answer" "mouse-1: show only its start"))))
+         (close (funcall button "[×]" claude-pair-review-note-button-map "mouse-1: dismiss this note")))
     (concat
-     bar (propertize (concat "@claude " (plist-get note :question)) 'face '(bold claude-pair-review-note))
-     "  " close "\n"
+     ;; The question, wrapped like the answer, with the buttons on its last line.
+     (let ((question (claude-pair-review--wrap
+                      (split-string (concat "@claude " (plist-get note :question)) "\n")
+                      (- (claude-pair-review--note-width (plist-get note :overlay)) 14))))
+       (mapconcat (lambda (line)
+                    (concat bar (propertize line 'face '(bold claude-pair-review-note))
+                            (if (eq line (car (last question)))
+                                (concat "  " (if fold (concat fold " ") "") close)
+                              "")
+                            "\n"))
+                  question ""))
      (if (null lines)
          (concat bar (propertize (if (plist-get note :done) "Claude: (no answer)" "Claude: …")
                                  'face 'claude-pair-review-note)
                  "\n")
        (concat
-        (mapconcat (lambda (line)
-                     (concat bar (propertize line 'face 'claude-pair-review-note) "\n"))
-                   (cons (concat "Claude: " (car shown)) (cdr shown))
-                   "")
-        (when (> (length lines) claude-pair-review-note-lines)
-          (concat bar (propertize "… the rest is in the chat" 'face '(italic claude-pair-review-note))
-                  "\n")))))))
+        (mapconcat (lambda (line) (concat bar (propertize line 'face 'claude-pair-review-note) "\n"))
+                   shown "")
+        (when (and folded (> (length lines) (length shown)))
+          (concat bar (propertize (format "… %d more lines " (- (length lines) (length shown)))
+                                  'face '(italic claude-pair-review-note))
+                  fold "\n")))))))
+
+(defun claude-pair-review-toggle-note (&optional id)
+  "Fold or unfold the note for edit ID, or the nearest note above point."
+  (interactive)
+  (let ((id (or id (claude-pair-review--note-near-point)
+                (user-error "No note from Claude here"))))
+    (when-let* ((note (gethash id claude-pair-review--notes)))
+      (plist-put note :folded (not (plist-get note :folded)))
+      (claude-pair-review--redraw-note id))))
+
+(defun claude-pair-review--note-near-point ()
+  "Return the id of the note on the line of point, or the nearest above it."
+  (let (best best-pos)
+    (maphash (lambda (id note)
+               (let ((ov (plist-get note :overlay)))
+                 (when (and (eq (overlay-buffer ov) (current-buffer))
+                            (<= (overlay-start ov) (line-end-position))
+                            (or (null best-pos) (> (overlay-start ov) best-pos)))
+                   (setq best id best-pos (overlay-start ov)))))
+             claude-pair-review--notes)
+    best))
+
+(defun claude-pair-review-click-fold (event)
+  "Fold or unfold the note whose button EVENT clicked."
+  (interactive "e")
+  (let ((string (posn-string (event-start event))))
+    (when-let* ((id (and string (get-text-property (cdr string) 'claude-pair-note (car string)))))
+      (claude-pair-review-toggle-note id))))
 
 (defun claude-pair-review--make-note (hunk question)
   "Put a note for QUESTION at the start of HUNK."
-  (let* ((id (claude-pair-review--hunk-id hunk))
-         (beg (claude-pair-review--hunk-beg hunk))
-         (old (gethash id claude-pair-review--notes)))
-    (when old (delete-overlay (plist-get old :overlay)))
-    (with-current-buffer (marker-buffer beg)
-      (let* ((bol (save-excursion (goto-char beg) (line-beginning-position)))
-             (overlay (make-overlay bol bol nil t nil)))
-        ;; Above the banner of whatever Claude proposes there next.
-        (overlay-put overlay 'priority 10)
-        (overlay-put overlay 'claude-pair-note id)
-        (puthash id (list :overlay overlay :question question :answer "") claude-pair-review--notes)
-        (overlay-put overlay 'before-string (claude-pair-review--note-text id))))))
+  (let ((beg (claude-pair-review--hunk-beg hunk)))
+    (claude-pair-review-add-note (claude-pair-review--hunk-id hunk) (marker-buffer beg) beg question)))
+
+(defun claude-pair-review-add-note (id buffer pos question)
+  "Put the note ID for QUESTION above the line of POS in BUFFER.
+Claude's answer goes into it with `claude-pair-review-note-append'."
+  (when-let* ((old (gethash id claude-pair-review--notes)))
+    (delete-overlay (plist-get old :overlay)))
+  (with-current-buffer buffer
+    (let* ((bol (save-excursion (goto-char pos) (line-beginning-position)))
+           (overlay (make-overlay bol bol nil t nil)))
+      ;; Above the banner of whatever Claude proposes there next.
+      (overlay-put overlay 'priority 10)
+      (overlay-put overlay 'claude-pair-note id)
+      (puthash id (list :overlay overlay :question question :answer "") claude-pair-review--notes)
+      (overlay-put overlay 'before-string (claude-pair-review--note-text id)))))
 
 (defun claude-pair-review-note-append (id text)
   "Add TEXT, more of Claude's answer, to the note for edit ID."

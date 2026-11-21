@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.9.0**. This document is the contract between the Emacs client
+Version **0.10.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -106,6 +106,9 @@ No params. Result:
 
 Params: `cwd` (absolute path of an existing directory, the project root),
 `claudePath` (absolute path of the `claude` command), optional `model`,
+optional `instructions`: the user's standing instructions, added to the
+system prompt of every turn, after claude-pair's own, as "The user's
+instructions for every answer: …";
 optional `env`: an object from variable names to a string, which sets the
 variable for this session's `claude`, or `null`, which removes it. Every
 other variable comes from the daemon's own environment. A name that is empty
@@ -137,7 +140,8 @@ claude -p --input-format stream-json --output-format stream-json --verbose
        --permission-prompt-tool mcp__emacs__permission
        --allowedTools mcp__emacs__edit_file,mcp__emacs__write_file,
                       mcp__emacs__open_file,mcp__emacs__close_window,mcp__emacs__list_windows
-       --append-system-prompt "<how files change and windows work in claude-pair>"
+       --append-system-prompt "<how files change and windows work in claude-pair,
+                               then the user's instructions>"
        [--model M] (--session-id ID | --resume ID)
 ```
 

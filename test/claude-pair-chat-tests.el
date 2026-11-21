@@ -300,5 +300,20 @@
               (should (eql (claude-pair-test--pid) pid))))
         (when (buffer-live-p second) (kill-buffer second))))))
 
+(ert-deftest claude-pair-chat-a-new-chat-carries-your-instructions ()
+  (let ((claude-pair-instructions "Use simple English.")
+        sent)
+    (cl-letf (((symbol-function 'claude-pair-rpc-request)
+               (lambda (method params &rest _) (when (eq method 'session/new) (setq sent params))
+                 '(:sessionId "s-instr" :claudeVersion "2.1.327")))
+              ((symbol-function 'claude-pair-chat--claude-path) (lambda () "/usr/bin/claude")))
+      (let ((buffer (claude-pair-chat--create "/tmp/project")))
+        (unwind-protect
+            (should (equal (plist-get sent :instructions) "Use simple English."))
+          (kill-buffer buffer)))))
+  ;; The default asks for simple English with correct technical terms.
+  (should (string-match-p "simple English" (default-value 'claude-pair-instructions)))
+  (should (string-match-p "correct technical terms" (default-value 'claude-pair-instructions))))
+
 (provide 'claude-pair-chat-tests)
 ;;; claude-pair-chat-tests.el ends here

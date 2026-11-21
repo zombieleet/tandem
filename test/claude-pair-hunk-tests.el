@@ -284,8 +284,9 @@
         (claude-pair-review-note-append "e1" "Because the loop needs ")
         (claude-pair-review-note-append "e1" "its own line.")
         (claude-pair-review-note-done "e1")
+        ;; Lines wrap to the window; read the note as one text.
         (should (string-match-p "Claude: Because the loop needs its own line\\."
-                                (overlay-get note 'before-string)))
+                                (replace-regexp-in-string "\n┃ " " " (overlay-get note 'before-string))))
         ;; Not part of the file.
         (should-not (string-match-p "@claude" (buffer-string)))
         (claude-pair-review-dismiss-note)
@@ -304,7 +305,7 @@
       (should-error (claude-pair-review-ask-hunk "") :type 'user-error)
       (claude-pair-review-dismiss-note))))
 
-(ert-deftest claude-pair-hunk-a-long-answer-points-to-the-chat ()
+(ert-deftest claude-pair-hunk-a-note-holds-the-whole-answer ()
   (claude-pair-test-with-file claude-pair-test--ten
     (claude-pair-test--two-hunks file)
     (with-current-buffer (find-buffer-visiting file)
@@ -312,13 +313,31 @@
       (let ((claude-pair-review-note-lines 2))
         (claude-pair-review-ask-hunk "explain")
         (claude-pair-review-note-append "e1" "one\ntwo\nthree\nfour")
-        (let ((text (overlay-get (plist-get (gethash "e1" claude-pair-review--notes) :overlay)
-                                 'before-string)))
-          (should (string-match-p "Claude: one" text))
-          (should (string-match-p "two" text))
-          (should-not (string-match-p "three" text))
-          (should (string-match-p "the rest is in the chat" text))))
+        (let ((text (lambda () (overlay-get (plist-get (gethash "e1" claude-pair-review--notes) :overlay)
+                                            'before-string))))
+          ;; All of it, in the editor.
+          (should (string-match-p "Claude: one" (funcall text)))
+          (should (string-match-p "four" (funcall text)))
+          (should-not (string-match-p "in the chat" (funcall text)))
+          (should (string-match-p "\\[fold\\]" (funcall text)))
+          ;; Folded: the start, and how much more there is.
+          (claude-pair-review-toggle-note "e1")
+          (should (string-match-p "two" (funcall text)))
+          (should-not (string-match-p "three" (funcall text)))
+          (should (string-match-p "… 2 more lines \\[unfold\\]" (funcall text)))
+          ;; From the line of the note, without the mouse.
+          (goto-char (point-min))
+          (forward-line 1)
+          (claude-pair-review-toggle-note)
+          (should (string-match-p "four" (funcall text)))))
       (claude-pair-review-dismiss-note))))
+
+(ert-deftest claude-pair-hunk-note-lines-wrap-to-the-window ()
+  (should (equal (claude-pair-review--wrap '("aaa bbb ccc ddd") 8) '("aaa bbb" "ccc ddd")))
+  ;; Lists keep their indentation; code blocks are never broken.
+  (should (equal (claude-pair-review--wrap '("- one two three four") 12) '("- one two" "  three four")))
+  (let ((code "    return some_function(argument_one, argument_two)"))
+    (should (equal (claude-pair-review--wrap (list "```" code "```") 20) (list "```" code "```")))))
 
 (ert-deftest claude-pair-hunk-the-chat-feeds-the-answer-into-the-note ()
   (claude-pair-test-with-file claude-pair-test--ten

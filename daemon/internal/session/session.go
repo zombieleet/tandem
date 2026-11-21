@@ -33,6 +33,9 @@ type Options struct {
 	// name with a value sets it, a name with nil removes it. Values are
 	// credentials, so they are never logged.
 	Env map[string]*string
+	// Instructions are the user's standing instructions for Claude, such as
+	// how to write; they go into the system prompt of every turn.
+	Instructions string
 	// HelperCommand starts the MCP helper ("claude-paird mcp ..."). When
 	// set, permission prompts go to its permission tool; when empty,
 	// anything that would ask is denied.
@@ -245,10 +248,12 @@ func (s *Session) Args(resume bool) []string {
 			// The user reviews every edit in Emacs; a second question first
 			// would only be noise.
 			"--allowedTools", strings.Join(append([]string{mcphelper.EditToolName, mcphelper.WriteToolName},
-				mcphelper.LayoutToolNames...), ","),
-			"--append-system-prompt", EditingPrompt)
+				mcphelper.LayoutToolNames...), ","))
 	} else {
 		args = append(args, "--permission-prompts", "none")
+	}
+	if prompt := s.systemPrompt(); prompt != "" {
+		args = append(args, "--append-system-prompt", prompt)
 	}
 	if s.opts.Model != "" {
 		args = append(args, "--model", s.opts.Model)
@@ -257,6 +262,19 @@ func (s *Session) Args(resume bool) []string {
 		return append(args, "--resume", s.opts.ID)
 	}
 	return append(args, "--session-id", s.opts.ID)
+}
+
+// systemPrompt is what claude-pair adds to Claude's system prompt: how
+// files change here, when Emacs is reachable, then the user's instructions.
+func (s *Session) systemPrompt() string {
+	var parts []string
+	if len(s.opts.HelperCommand) > 0 {
+		parts = append(parts, EditingPrompt)
+	}
+	if text := strings.TrimSpace(s.opts.Instructions); text != "" {
+		parts = append(parts, "The user's instructions for every answer: "+text)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func (s *Session) startLocked() error {

@@ -375,6 +375,8 @@ func (d *Daemon) newSession(c *client, params json.RawMessage) (any, error) {
 		ClaudePath string             `json:"claudePath"`
 		Model      string             `json:"model"`
 		Env        map[string]*string `json:"env"`
+		// Instructions go into the system prompt of every turn.
+		Instructions string `json:"instructions"`
 	}
 	if len(params) == 0 || json.Unmarshal(params, &p) != nil {
 		return nil, rpc.Errorf(protocol.InvalidParams, "session/new needs cwd and claudePath")
@@ -393,11 +395,12 @@ func (d *Daemon) newSession(c *client, params json.RawMessage) (any, error) {
 	}
 	id := newSessionID()
 	s := session.New(session.Options{
-		ID:         id,
-		Cwd:        p.Cwd,
-		ClaudePath: p.ClaudePath,
-		Model:      p.Model,
-		Env:        p.Env,
+		ID:           id,
+		Cwd:          p.Cwd,
+		ClaudePath:   p.ClaudePath,
+		Model:        p.Model,
+		Env:          p.Env,
+		Instructions: p.Instructions,
 		HelperCommand: []string{d.opts.HelperPath, "mcp",
 			"--socket", d.opts.SocketPath, "--session", id},
 		Log:    d.opts.Log,

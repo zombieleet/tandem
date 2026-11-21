@@ -82,6 +82,7 @@ emacs -Q -L ~/src/claude-pair/lisp --eval "(require 'claude-pair)"
 | Command | What it does |
 |---|---|
 | `M-x claude-pair` | Chat with Claude about the current project (`C-u` starts a new session) |
+| `M-x claude-pair-ask` | Ask Claude about the region, or the function or line at point (`@claude …`) |
 | `M-x claude-pair-review` | List every hunk waiting for your review |
 | `M-x claude-pair-set-review-style` | Choose how Claude's edits wait for you: blocking, deferred, auto-accept |
 | `M-x claude-pair-blame` | Say who wrote the line at point (`C-u`: every run of Claude's lines) |
@@ -103,6 +104,29 @@ In the chat buffer, type after the `❯` prompt:
 
 The header line shows the model, what Claude is doing, and the session's cost
 so far. Each tool call is one line: `▸` while it runs, `✓` or `✗` when done.
+
+## How Claude writes
+
+Every chat tells Claude, in its system prompt, how to write
+(`claude-pair-instructions`). The default: clear, simple English, with
+short sentences and everyday words, the correct technical terms, and a few
+plain words explaining a term that may be unfamiliar. Change it to
+anything you like, or set it to "" for none; it applies to new chats.
+
+## Asking about any code
+
+Select some code, or put point in a function, and `M-x claude-pair-ask`:
+`@claude (about lines 12-30 of geo.py): explain this`. The question goes
+to the project's chat with the file, the lines and the code, so Claude sees
+exactly what you point at. The answer streams into the chat and into a
+note above the code, whole, wrapped to your window, so you can read it
+without opening the chat. `[fold]` shows only its start (`[unfold]` the
+rest; `M-x claude-pair-review-toggle-note` from the keyboard), and `[×]`
+dismisses it. Ask for a change ("add error
+handling here") and you get a proposed edit, reviewed as usual. Asking
+never moves you: no tab switch, the chat is not selected, and a draft you
+were typing in the chat stays. Bind it to a key you like, for example
+`(keymap-global-set "C-c a" #'claude-pair-ask)`.
 
 ## Where Claude starts
 
@@ -161,9 +185,9 @@ Asking (`C-c '`, or "@ Ask Claude…" in the popup) sends the edit back to
 Claude with your question. Hunks you already decided keep their decision;
 the rest are not applied, and Claude answers and proposes them again,
 revised if your question calls for it. The answer streams into the chat
-and into a note where the hunk was (`┃ @claude …`), which `[×]` or `M-x
-claude-pair-review-dismiss-note` removes; the note shows the first
-`claude-pair-review-note-lines` lines (6).
+and into a note where the hunk was (`┃ @claude …`), with the whole answer;
+`[fold]` shows only its first `claude-pair-review-note-lines` lines (3), and
+`[×]` or `M-x claude-pair-review-dismiss-note` removes it.
 
 Claude hears what happened to every hunk, with your notes, once the last
 one is decided. The chat shows the edit as a block with its number of
@@ -317,6 +341,7 @@ likely to change:
 | `claude-pair-author-tint` | 0.10 | How much of it to blend in |
 | `claude-pair-attribution-ignore-whitespace` | t | A Claude line whose only change is whitespace keeps its colour |
 | `claude-pair-attribution-persist` | t | Remember Claude's lines after a file is closed |
+| `claude-pair-instructions` | simple English, correct technical terms | Standing instructions Claude follows in every answer; empty for none |
 | `claude-pair-model` | nil | Model for new chats, such as `"opus"`; nil for Claude Code's default |
 | `claude-pair-environment-variables` | credentials, provider, proxies | Variables each new chat takes from Emacs |
 | `claude-pair-claude-command` | nil | Path of `claude`; nil looks on `exec-path` |

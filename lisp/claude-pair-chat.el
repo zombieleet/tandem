@@ -77,6 +77,17 @@ which inherited them from the Emacs that started it."
   :type '(repeat string)
   :group 'claude-pair)
 
+(defcustom claude-pair-instructions
+  "Write in clear, simple English: short sentences and everyday words, so \
+that someone still learning English understands you easily. Use the \
+correct technical terms, and when a term may be unfamiliar, say what it \
+means in a few plain words the first time you use it."
+  "Standing instructions Claude follows in every answer of a new chat.
+They go into Claude's system prompt, so they hold for every message
+without being repeated.  Empty for none."
+  :type 'string
+  :group 'claude-pair)
+
 (defcustom claude-pair-model nil
   "Model for new sessions, such as \"opus\", or nil for Claude Code's default."
   :type '(choice (const :tag "Claude Code's default" nil) string)
@@ -242,7 +253,8 @@ See `claude-pair-project-root'."
 (defun claude-pair-chat--create (root)
   "Start a session about ROOT and return its new chat buffer."
   (let* ((params (list :cwd root :claudePath (claude-pair-chat--claude-path)
-                       :env (claude-pair-chat--environment)))
+                       :env (claude-pair-chat--environment)
+                       :instructions (or claude-pair-instructions "")))
          (result
           (condition-case err
               (claude-pair-rpc-request

@@ -49,11 +49,39 @@ starts.
 - [X] In a folder with nothing: you are asked; and from =~=, you are asked
   before Claude gets your home folder
 
-* TODO M2 · Ask about any selection [0/3]
-- [ ] Select code anywhere (or nothing: the function at point) and
-  =@claude …=: "explain this", "add error handling here"
-- [ ] It goes to the project's chat with the file, line range and code
-- [ ] The answer also shows as a note above the selection, as for hunks
+* DONE M2 · Ask about any selection [3/3]
+- [X] =M-x claude-pair-ask= on the region, else the function at point,
+  else the line: =@claude (about lines 12-30 of geo.py): …=
+- [X] It goes to the project's chat (started if needed) with the file,
+  line range and code in a fence (longer than any backticks in the code,
+  with the language); a busy chat says so instead
+- [X] The answer streams into a note above the code, as for hunks (notes
+  can now go anywhere); asking never switches tabs, selects the chat or
+  touches your draft there
+** Auto
+- [X] ERT: a region, the function at point, your draft kept, a busy chat
+  and an empty question, the message and fence, asking for real through
+  the daemon (6 tests); =make check= clean (188 ERT tests)
+** Interactive check run by Claude (GUI in headless cage, fake claude)
+- [X] Selected =area=, asked "explain this function": the note shows above
+  =def area(r):= with the reply; the chat got the file, lines and code; the
+  file window kept focus
+** Asked by you during the check
+- [X] "… the rest is in the chat": a note now holds the whole answer,
+  wrapped to the window (code blocks untouched), so you never need the
+  chat to read it; =[fold]= / =[unfold]= (or =M-x
+  claude-pair-review-toggle-note=) for long ones
+- [X] Every chat tells Claude to write clear, simple English with the
+  correct technical terms, explaining an unfamiliar term in plain words:
+  =claude-pair-instructions=, in the system prompt of every turn
+  (=instructions= in =session/new=, protocol 0.10.0). Checked: the
+  arguments the daemon gives =claude= end with these instructions
+** Visual gate (passed 21 Nov 2026, in your Doom Emacs)
+- [X] Select a few lines, =M-x claude-pair-ask=, "explain this": the answer
+  shows above the code and in the chat, and you stay where you were
+- [X] With nothing selected, in a function: it asks about that function
+- [X] Ask for a change ("add error handling here"): a proposed edit comes,
+  reviewed as usual
 
 * TODO M3 · Mentions in the chat [0/3]
 - [ ] Type =@= in the chat for completion: =@file= (project files),

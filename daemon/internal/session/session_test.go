@@ -466,3 +466,31 @@ func TestToolTitles(t *testing.T) {
 		}
 	}
 }
+
+func TestInstructionsGoIntoTheSystemPrompt(t *testing.T) {
+	s := New(Options{ID: "abc", Cwd: "/p", ClaudePath: "/c", Instructions: "  Use simple English.  ",
+		HelperCommand: []string{"/bin/claude-paird", "mcp"}})
+	args := s.Args(false)
+	var prompt string
+	for i, a := range args {
+		if a == "--append-system-prompt" {
+			if prompt != "" {
+				t.Fatal("--append-system-prompt given twice")
+			}
+			prompt = args[i+1]
+		}
+	}
+	if prompt != EditingPrompt+"\n\nThe user's instructions for every answer: Use simple English." {
+		t.Fatalf("system prompt %q", prompt)
+	}
+	// Without the helper, the instructions still go in.
+	s = New(Options{ID: "abc", Cwd: "/p", ClaudePath: "/c", Instructions: "Be brief."})
+	if got := strings.Join(s.Args(false), " "); !strings.Contains(got, "--append-system-prompt The user's instructions for every answer: Be brief.") {
+		t.Fatalf("args %q", got)
+	}
+	// Neither: no flag at all.
+	s = New(Options{ID: "abc", Cwd: "/p", ClaudePath: "/c"})
+	if got := strings.Join(s.Args(false), " "); strings.Contains(got, "--append-system-prompt") {
+		t.Fatalf("args %q", got)
+	}
+}
