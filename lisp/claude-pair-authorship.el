@@ -354,37 +354,82 @@ text was whole lines."
           (forward-line 1))))
     (vconcat (nreverse prints))))
 
+(defun claude-pair-authorship-snapshot ()
+  "Return which lines of the buffer are Claude's, as a plist, or nil if none.
+:lines holds every line's fingerprint, :claude a vector of [INDEX ID]
+for Claude's lines (from 0), :records the records those ids name."
+  (let ((claude nil) (ids nil))
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char (point-min))
+        (let ((index 0))
+          (while (not (eobp))
+            (when-let* ((id (claude-pair-authorship-at (point))))
+              (push (vector index id) claude)
+              (cl-pushnew id ids :test #'equal))
+            (setq index (1+ index))
+            (forward-line 1)))))
+    (when claude
+      (list :lines (claude-pair-authorship--fingerprints)
+            :claude (vconcat (nreverse claude))
+            :records (vconcat
+                      (mapcar (lambda (id)
+                                (append (list :id id) (claude-pair-authorship-record-of id)))
+                              ids))))))
+
+(defun claude-pair-authorship-apply (data)
+  "Colour Claude's lines from DATA, a snapshot, where they still are.
+DATA is as `claude-pair-authorship-snapshot' returns, perhaps of another
+version of the text: lines are matched by a diff of the fingerprints.
+Return how many lines were marked."
+  (let* ((old (plist-get data :lines))
+         (new (claude-pair-authorship--fingerprints))
+         (moved (claude-pair-authorship--map-lines old new))
+         (marked 0))
+    (seq-doseq (record (plist-get data :records))
+      (let ((id (plist-get record :id)))
+        (unless (gethash id claude-pair-authorship--records)
+          (puthash id (cl-loop for (key value) on record by #'cddr
+                               unless (eq key :id) append (list key value))
+                   claude-pair-authorship--records))))
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char (point-min))
+        ;; In line order, so one pass forward reaches them all.
+        (let ((at 0)
+              (lines (sort (delq nil (mapcar (lambda (entry)
+                                               (when-let* ((line (gethash (aref entry 0) moved)))
+                                                 (cons line (aref entry 1))))
+                                             (plist-get data :claude)))
+                           (lambda (a b) (< (car a) (car b))))))
+          (dolist (line lines)
+            (forward-line (- (car line) at))
+            (setq at (car line))
+            (when (< (point) (line-end-position))
+              (let ((inhibit-read-only t))
+                (with-silent-modifications
+                  (put-text-property (point) (line-end-position)
+                                     'claude-pair-author (cdr line))))
+              (setq marked (1+ marked)))))))
+    (when (> marked 0)
+      (claude-pair-authorship--watch)
+      (claude-pair-authorship--schedule))
+    marked))
+
 (defun claude-pair-authorship--save ()
   "Write down which lines of the file just saved are Claude's."
   (when (and claude-pair-attribution-persist buffer-file-name)
     (let ((store (claude-pair-authorship--store buffer-file-name))
-          (claude nil)
-          (ids nil))
-      (save-excursion
-        (save-restriction
-          (widen)
-          (goto-char (point-min))
-          (let ((index 0))
-            (while (not (eobp))
-              (when-let* ((id (claude-pair-authorship-at (point))))
-                (push (vector index id) claude)
-                (cl-pushnew id ids :test #'equal))
-              (setq index (1+ index))
-              (forward-line 1)))))
+          (snapshot (claude-pair-authorship-snapshot)))
       (condition-case err
-          (if (null claude)
+          (if (null snapshot)
               (when (file-exists-p store)
                 (delete-file store))
             (let ((json (json-serialize
-                         (list :version 1
-                               :file (abbreviate-file-name buffer-file-name)
-                               :lines (claude-pair-authorship--fingerprints)
-                               :claude (vconcat (nreverse claude))
-                               :records (vconcat
-                                         (mapcar (lambda (id)
-                                                   (append (list :id id)
-                                                           (claude-pair-authorship-record-of id)))
-                                                 ids)))
+                         (append (list :version 1 :file (abbreviate-file-name buffer-file-name))
+                                 snapshot)
                          :null-object nil :false-object :false)))
               (with-file-modes #o700
                 (make-directory claude-pair-attribution-directory t))
@@ -393,51 +438,26 @@ text was whole lines."
         (error (message "claude-pair: could not remember Claude's lines in %s: %s"
                         (file-name-nondirectory buffer-file-name) (error-message-string err)))))))
 
+(defvar claude-pair-authorship-restore-functions nil
+  "Functions called in a visited file where no line was found to be Claude's.
+Each may find Claude's lines elsewhere, such as in git notes.")
+
 (defun claude-pair-authorship-restore ()
   "Give Claude's lines in this file their colour back, where they still are."
   (when (and claude-pair-attribution-persist buffer-file-name)
-    (let ((store (claude-pair-authorship--store buffer-file-name)))
+    (let ((store (claude-pair-authorship--store buffer-file-name))
+          (marked 0))
       (when (file-readable-p store)
         (condition-case err
-            (let* ((data (json-parse-string
-                          (with-temp-buffer (insert-file-contents store) (buffer-string))
-                          :object-type 'plist :array-type 'array
-                          :null-object nil :false-object nil))
-                   (old (plist-get data :lines))
-                   (new (claude-pair-authorship--fingerprints))
-                   (moved (claude-pair-authorship--map-lines old new))
-                   (marked 0))
-              (seq-doseq (record (plist-get data :records))
-                (let ((id (plist-get record :id)))
-                  (unless (gethash id claude-pair-authorship--records)
-                    (puthash id (cl-loop for (key value) on record by #'cddr
-                                         unless (eq key :id) append (list key value))
-                             claude-pair-authorship--records))))
-              (save-excursion
-                (save-restriction
-                  (widen)
-                  (goto-char (point-min))
-                  ;; In line order, so one pass forward reaches them all.
-                  (let ((at 0)
-                        (lines (sort (delq nil (mapcar (lambda (entry)
-                                                         (when-let* ((line (gethash (aref entry 0) moved)))
-                                                           (cons line (aref entry 1))))
-                                                       (plist-get data :claude)))
-                                     (lambda (a b) (< (car a) (car b))))))
-                    (dolist (line lines)
-                      (forward-line (- (car line) at))
-                      (setq at (car line))
-                      (when (< (point) (line-end-position))
-                        (let ((inhibit-read-only t))
-                          (with-silent-modifications
-                            (put-text-property (point) (line-end-position)
-                                               'claude-pair-author (cdr line))))
-                        (setq marked (1+ marked)))))))
-              (when (> marked 0)
-                (claude-pair-authorship--watch)
-                (claude-pair-authorship--schedule)))
+            (setq marked (claude-pair-authorship-apply
+                          (json-parse-string
+                           (with-temp-buffer (insert-file-contents store) (buffer-string))
+                           :object-type 'plist :array-type 'array
+                           :null-object nil :false-object nil)))
           (error (message "claude-pair: could not read Claude's lines for %s: %s"
-                          (file-name-nondirectory buffer-file-name) (error-message-string err))))))))
+                          (file-name-nondirectory buffer-file-name) (error-message-string err)))))
+      (when (zerop marked)
+        (run-hooks 'claude-pair-authorship-restore-functions)))))
 
 (defun claude-pair-authorship--map-lines (old new)
   "Return a table from line index in OLD to the same line's index in NEW.

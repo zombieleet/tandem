@@ -63,7 +63,7 @@ to bind; pick any free one):
 ```elisp
 (use-package claude-pair
   :load-path "~/src/claude-pair/lisp"
-  :commands claude-pair
+  :demand t
   :bind ("C-c C" . claude-pair))
 ```
 
@@ -71,9 +71,14 @@ Without `use-package`:
 
 ```elisp
 (add-to-list 'load-path "~/src/claude-pair/lisp")
-(autoload 'claude-pair "claude-pair" nil t)
+(require 'claude-pair)
 (keymap-global-set "C-c C" #'claude-pair)
 ```
+
+Load it at startup, as here, rather than on first use: it takes about
+60 ms and starts no daemon, and from then on Claude's lines get their
+colour back in files you open, and commits get their git notes, even
+before you open a chat.
 
 To try it without touching your configuration:
 
@@ -299,6 +304,31 @@ Edit proposals open by the same rules. When the chat is not shown, an
 edit proposal or permission question comes to you, since Claude is waiting
 for you, except when you are in another tab than Claude's: then your tab is
 left alone and the echo area tells you to switch (`C-x t o`).
+
+## Claude's lines in git notes
+
+Claude's lines keep their colour on this machine. With git notes they also
+travel with the repository: to another clone, another machine, a
+colleague.
+
+- When you commit with Magit, a note on the new commit, in
+  `refs/notes/claude-pair`, says which of the committed lines are Claude's:
+  fingerprints of the lines and who wrote them, never the code, and no
+  paths of your machine. Lines you did not commit are left out.
+- When you open a file whose colours this machine does not know, the
+  nearest note on it gives them back, matched by a diff, so later commits
+  are fine.
+- `M-x claude-pair-notes-write` writes the note for a commit made outside
+  Emacs; `M-x claude-pair-notes-restore` reads notes for the file at hand.
+- Notes stay local until you share them. A plain `git push` never sends
+  them. `M-x claude-pair-notes-share` has a remote fetch them from now on,
+  into `refs/notes/remotes/<remote>/claude-pair`, apart from yours, so a
+  fetch or pull never overwrites notes you have not pushed; it then
+  merges the two (yours win on the same commit) and pushes yours after
+  asking. `claude-pair-notes-automatic` (t) turns the automatic part off.
+- Other people and other editors see nothing of the notes unless they
+  ask git for that ref: they are not files in the project, `git log`
+  does not show them, and GitHub does not display them.
 
 ## Several chats at once
 

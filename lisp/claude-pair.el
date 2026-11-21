@@ -52,6 +52,7 @@
 (require 'claude-pair-rewind)
 (require 'claude-pair-plan)
 (require 'claude-pair-agents)
+(require 'claude-pair-notes)
 
 ;; Optional parts: each loads only with the package it works with.
 (autoload 'claude-pair-magit-stage-claude "claude-pair-magit"
