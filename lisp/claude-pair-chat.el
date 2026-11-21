@@ -65,7 +65,7 @@
 
 (defcustom claude-pair-environment-variables
   '("ANTHROPIC_API_KEY" "ANTHROPIC_AUTH_TOKEN" "ANTHROPIC_BASE_URL" "ANTHROPIC_MODEL"
-    "CLAUDE_CODE_USE_BEDROCK" "CLAUDE_CODE_USE_VERTEX"
+    "CLAUDE_CODE_USE_BEDROCK" "CLAUDE_CODE_USE_VERTEX" "CLAUDE_CONFIG_DIR"
     "AWS_PROFILE" "AWS_REGION" "CLOUD_ML_REGION" "ANTHROPIC_VERTEX_PROJECT_ID"
     "HTTPS_PROXY" "HTTP_PROXY" "NO_PROXY" "https_proxy" "http_proxy" "no_proxy")
   "Environment variables each new session takes from Emacs.
@@ -190,6 +190,11 @@ run in the chat buffer.")
 (defvar claude-pair-chat-show-user-function #'identity
   "Function that turns your message into what the transcript shows.")
 
+(defvar claude-pair-chat-reattach-function #'ignore
+  "Function returning a chat buffer for a project ROOT left open in the daemon.
+`claude-pair' calls it when the project has no chat buffer; nil from it
+means a new chat starts.")
+
 (defvar-local claude-pair-chat--review-results nil
   "Your decisions on deferred edits, oldest first, for your next message.
 Each is (TEXT . ID), ID being the edit's request id when TEXT asks a
@@ -312,11 +317,16 @@ Unless it is visible already, first switch to Claude's tab; see
 ;;;###autoload
 (defun claude-pair (&optional new)
   "Chat with Claude about the current project.
-Show this project's chat, or start one.  With prefix argument NEW,
-always start a new session."
+Show this project's chat; else reattach to one still open in the daemon,
+as after Emacs restarted; else start one.  With prefix argument NEW,
+always start a new session.  To reopen an older chat, use
+`claude-pair-resume'."
   (interactive "P")
   (let* ((root (claude-pair-chat--project-root))
-         (buffer (unless new (claude-pair-chat--buffer-for root))))
+         (buffer (unless new
+                   (or (claude-pair-chat--buffer-for root)
+                       ;; Still open in the daemon, after Emacs restarted.
+                       (funcall claude-pair-chat-reattach-function root)))))
     (claude-pair-chat--display (or buffer (claude-pair-chat--create root)))))
 
 (defun claude-pair-chat--setup (session-id root)

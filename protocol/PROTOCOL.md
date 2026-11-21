@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.11.0**. This document is the contract between the Emacs client
+Version **0.12.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -120,6 +120,40 @@ The daemon runs `claudePath --version` and refuses Claude Code older than
 UUID that Claude Code also uses, so `claude --resume <sessionId>` finds the
 same conversation. The calling client follows the session. No `claude`
 process starts until the first prompt.
+
+### `session/list` (client → daemon)
+
+Params: `cwd` (absolute project path), optional `env` (as for
+`session/new`; only `CLAUDE_CONFIG_DIR` is read from it), optional `limit`
+(1–200, default 50).
+
+The daemon reads the conversations Claude Code keeps under
+`<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<cwd with every character other
+than a letter or digit turned into ->/<sessionId>.jsonl`, whoever started
+them, Claude Code in a terminal included. A conversation whose prompts came
+from another directory, or that holds no prompt of the user's, is left out.
+Result: `{sessions: [{sessionId, title, modified, prompts, costUsd, running,
+busy}]}`, newest first. `title` is the name Claude Code gave the
+conversation, else the first line of its first prompt; `modified` is an
+RFC 3339 time; `prompts` counts the user's messages; `costUsd` is Claude
+Code's total, `0` when it has not written one; `running` says the session is
+open in this daemon, and `busy` that a turn runs now.
+
+### `session/resume` (client → daemon)
+
+Params: those of `session/new`, plus `sessionId`. A session open in this
+daemon for the same `cwd` is followed by the client from now on, as after an
+Emacs restart. Any other is registered again, and its first prompt starts
+`claude --resume <sessionId>`, so Claude remembers the conversation. A
+`sessionId` that is not a UUID fails with `-32602`; one with no conversation
+about `cwd` with `-32004`.
+
+Result: `{sessionId, running, history}`, plus `busy` and `costUsd` for a
+running session, or `claudeVersion` for one registered again. `history`
+holds the conversation in order: `{kind: "user", text}` for the user's
+messages, `{kind: "text", text}` for Claude's words, `{kind: "tool", title,
+error}` for tool calls, with the titles of `tool_start` updates. Subagents'
+work, thinking and messages Claude Code adds itself are left out.
 
 ### `session/prompt` (client → daemon)
 

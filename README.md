@@ -285,6 +285,18 @@ edit proposal or permission question comes to you, since Claude is waiting
 for you, except when you are in another tab than Claude's: then your tab is
 left alone and the echo area tells you to switch (`C-x t o`).
 
+## Reopening earlier chats
+
+`M-x claude-pair-resume` lists the project's earlier chats, newest first,
+with their title, age, number of messages and cost. The one you pick opens
+with its conversation drawn again, and Claude goes on where it stopped,
+remembering all of it. Claude Code keeps every conversation, so chats you
+had with Claude Code in a terminal are in the list too.
+
+When Emacs restarts, the daemon keeps your chats open. `M-x claude-pair`
+in a project then reattaches to the chat that was open there, conversation
+included. With `C-u` it starts a new chat instead.
+
 ## Code in the chat
 
 The chat shows code the way Markdown means it, in your messages and in

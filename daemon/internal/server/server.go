@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/victory/claude-pair/daemon/internal/history"
 	"github.com/victory/claude-pair/daemon/internal/paths"
 	"github.com/victory/claude-pair/daemon/internal/protocol"
 	"github.com/victory/claude-pair/daemon/internal/rpc"
@@ -297,6 +298,10 @@ func (d *Daemon) handle(ctx context.Context, c *client, method string, params js
 		return d.Status(), nil
 	case "session/new":
 		return d.newSession(c, params)
+	case "session/list":
+		return d.listSessions(params)
+	case "session/resume":
+		return d.resumeSession(c, params)
 	case "session/prompt":
 		return d.prompt(c, params)
 	case "session/cancel":
@@ -367,19 +372,22 @@ func (d *Daemon) initialize(c *client, params json.RawMessage) (any, error) {
 	}, nil
 }
 
-// newSession checks the project directory and the claude command, then
-// registers a session. Claude starts with the first prompt.
-func (d *Daemon) newSession(c *client, params json.RawMessage) (any, error) {
-	var p struct {
-		Cwd        string             `json:"cwd"`
-		ClaudePath string             `json:"claudePath"`
-		Model      string             `json:"model"`
-		Env        map[string]*string `json:"env"`
-		// Instructions go into the system prompt of every turn.
-		Instructions string `json:"instructions"`
-	}
+// sessionParams are what session/new and session/resume take.
+type sessionParams struct {
+	SessionID  string             `json:"sessionId"`
+	Cwd        string             `json:"cwd"`
+	ClaudePath string             `json:"claudePath"`
+	Model      string             `json:"model"`
+	Env        map[string]*string `json:"env"`
+	// Instructions go into the system prompt of every turn.
+	Instructions string `json:"instructions"`
+}
+
+// parseSessionParams reads and checks params for method.
+func parseSessionParams(method string, params json.RawMessage) (*sessionParams, error) {
+	var p sessionParams
 	if len(params) == 0 || json.Unmarshal(params, &p) != nil {
-		return nil, rpc.Errorf(protocol.InvalidParams, "session/new needs cwd and claudePath")
+		return nil, rpc.Errorf(protocol.InvalidParams, "%s needs cwd and claudePath", method)
 	}
 	for name := range p.Env {
 		if name == "" || strings.ContainsAny(name, "=\x00") {
@@ -389,11 +397,28 @@ func (d *Daemon) newSession(c *client, params json.RawMessage) (any, error) {
 	if info, err := os.Stat(p.Cwd); !filepath.IsAbs(p.Cwd) || err != nil || !info.IsDir() {
 		return nil, rpc.Errorf(protocol.InvalidParams, "cwd must be an existing absolute directory, got %q", p.Cwd)
 	}
+	return &p, nil
+}
+
+// newSession checks the project directory and the claude command, then
+// registers a session. Claude starts with the first prompt.
+func (d *Daemon) newSession(c *client, params json.RawMessage) (any, error) {
+	p, err := parseSessionParams("session/new", params)
+	if err != nil {
+		return nil, err
+	}
 	version, err := session.CheckClaude(p.ClaudePath)
 	if err != nil {
 		return nil, rpc.Errorf(protocol.ClaudeUnavailable, "%s", err.Error())
 	}
 	id := newSessionID()
+	d.startSession(c, id, p, false)
+	d.opts.Log.Info("session created", "session", id, "cwd", p.Cwd, "claude", version)
+	return map[string]string{"sessionId": id, "claudeVersion": version}, nil
+}
+
+// startSession registers session id for client c.
+func (d *Daemon) startSession(c *client, id string, p *sessionParams, resume bool) {
 	s := session.New(session.Options{
 		ID:           id,
 		Cwd:          p.Cwd,
@@ -406,12 +431,99 @@ func (d *Daemon) newSession(c *client, params json.RawMessage) (any, error) {
 		Log:    d.opts.Log,
 		Emit:   func(u session.Update) { d.broadcast(id, u) },
 		OnIdle: d.armIdle,
+		Resume: resume,
 	})
 	d.mu.Lock()
 	d.sessions[id] = &sessionEntry{s: s, subs: map[*client]bool{c: true}}
 	d.mu.Unlock()
-	d.opts.Log.Info("session created", "session", id, "cwd", p.Cwd, "claude", version)
-	return map[string]string{"sessionId": id, "claudeVersion": version}, nil
+}
+
+// listSessions returns the earlier conversations about a project, newest
+// first, marking those that still run in this daemon.
+func (d *Daemon) listSessions(params json.RawMessage) (any, error) {
+	var p struct {
+		Cwd   string             `json:"cwd"`
+		Env   map[string]*string `json:"env"`
+		Limit int                `json:"limit"`
+	}
+	if len(params) == 0 || json.Unmarshal(params, &p) != nil || !filepath.IsAbs(p.Cwd) {
+		return nil, rpc.Errorf(protocol.InvalidParams, "session/list needs an absolute cwd")
+	}
+	if p.Limit <= 0 || p.Limit > 200 {
+		p.Limit = 50
+	}
+	chats, err := history.List(history.ConfigDir(p.Env), p.Cwd, p.Limit)
+	if err != nil {
+		return nil, rpc.Errorf(protocol.InternalError, "reading Claude Code's conversations: %s", err.Error())
+	}
+	type listed struct {
+		history.Chat
+		Running bool `json:"running"`
+		Busy    bool `json:"busy"`
+	}
+	out := make([]listed, 0, len(chats))
+	d.mu.Lock()
+	for _, chat := range chats {
+		l := listed{Chat: chat}
+		if e, ok := d.sessions[chat.SessionID]; ok {
+			l.Running, l.Busy = true, e.s.Busy()
+		}
+		out = append(out, l)
+	}
+	d.mu.Unlock()
+	return map[string]any{"sessions": out}, nil
+}
+
+// resumeSession reopens a conversation: one still running here is followed
+// by the client; another is continued with claude --resume. Either way the
+// result carries the conversation so far.
+func (d *Daemon) resumeSession(c *client, params json.RawMessage) (any, error) {
+	p, err := parseSessionParams("session/resume", params)
+	if err != nil {
+		return nil, err
+	}
+	if !history.ValidID(p.SessionID) {
+		return nil, rpc.Errorf(protocol.InvalidParams, "session/resume needs a sessionId")
+	}
+	entries, err := history.Read(history.ConfigDir(p.Env), p.Cwd, p.SessionID)
+	if entries == nil {
+		entries = []history.Entry{}
+	}
+	d.mu.Lock()
+	e, running := d.sessions[p.SessionID]
+	if running && e.s.Cwd() != p.Cwd {
+		// The same conversation from another folder is not this project's.
+		d.mu.Unlock()
+		return nil, rpc.Errorf(protocol.UnknownSession, "no conversation %s about %s", p.SessionID, p.Cwd)
+	}
+	if running {
+		e.subs[c] = true
+		e.last = c
+	}
+	d.mu.Unlock()
+	if err != nil && !running {
+		return nil, rpc.Errorf(protocol.UnknownSession, "no conversation %s about %s", p.SessionID, p.Cwd)
+	}
+	for i := range entries {
+		if entries[i].Kind == "tool" {
+			entries[i].Title = session.ToolTitle(entries[i].Name, entries[i].Input, p.Cwd)
+		}
+	}
+	result := map[string]any{"sessionId": p.SessionID, "history": entries, "running": running}
+	if running {
+		result["busy"] = e.s.Busy()
+		result["costUsd"] = e.s.TotalCostUSD()
+		d.opts.Log.Info("session reattached", "session", p.SessionID)
+		return result, nil
+	}
+	version, err := session.CheckClaude(p.ClaudePath)
+	if err != nil {
+		return nil, rpc.Errorf(protocol.ClaudeUnavailable, "%s", err.Error())
+	}
+	d.startSession(c, p.SessionID, p, true)
+	result["claudeVersion"] = version
+	d.opts.Log.Info("session resumed", "session", p.SessionID, "cwd", p.Cwd, "claude", version)
+	return result, nil
 }
 
 func (d *Daemon) prompt(c *client, params json.RawMessage) (any, error) {

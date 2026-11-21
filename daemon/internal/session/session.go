@@ -45,6 +45,9 @@ type Options struct {
 	Emit func(Update)
 	// OnIdle runs after a turn ends, once its updates have been emitted.
 	OnIdle func()
+	// Resume continues the conversation with ID that Claude Code already
+	// keeps on disk, instead of starting a new one.
+	Resume bool
 }
 
 var (
@@ -125,7 +128,7 @@ func New(opts Options) *Session {
 		opts.OnIdle = func() {}
 	}
 	opts.Log = opts.Log.With("session", opts.ID)
-	return &Session{opts: opts}
+	return &Session{opts: opts, resumable: opts.Resume}
 }
 
 // ID returns the session id, which is also Claude Code's session id.

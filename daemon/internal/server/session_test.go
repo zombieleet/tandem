@@ -284,3 +284,75 @@ func startDaemonWithLog(t *testing.T, write func([]byte)) *Daemon {
 	t.Cleanup(func() { d.Stop("test cleanup") })
 	return d
 }
+
+func TestListAndResumeAConversation(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	argsLog := filepath.Join(t.TempDir(), "args")
+	t.Setenv("FAKE_CLAUDE_ARGS_LOG", argsLog)
+	d := startDaemon(t, 0, "cpd-")
+	c := ready(t, d)
+	cwd := t.TempDir()
+	m := c.request("session/new", map[string]string{"cwd": cwd, "claudePath": fakeClaude})
+	wantOK(t, m)
+	var r struct{ SessionID string }
+	json.Unmarshal(m.Result, &r)
+	prompt(t, c, r.SessionID, "script:hello")
+	c.untilIdle(r.SessionID)
+
+	// Listed, and marked as running here.
+	m = c.request("session/list", map[string]string{"cwd": cwd})
+	wantOK(t, m)
+	var list struct {
+		Sessions []struct {
+			SessionID, Title string
+			Prompts          int
+			Running, Busy    bool
+		}
+	}
+	json.Unmarshal(m.Result, &list)
+	if len(list.Sessions) != 1 || list.Sessions[0].SessionID != r.SessionID || list.Sessions[0].Title != "script:hello" ||
+		list.Sessions[0].Prompts != 1 || !list.Sessions[0].Running {
+		t.Fatalf("list %+v", list)
+	}
+
+	// Another Emacs reattaches to the running session and gets its updates.
+	c2 := ready(t, d)
+	m = c2.request("session/resume", map[string]string{"sessionId": r.SessionID, "cwd": cwd, "claudePath": fakeClaude})
+	wantOK(t, m)
+	var res struct {
+		Running bool
+		History []struct{ Kind, Text, Title string }
+	}
+	json.Unmarshal(m.Result, &res)
+	if !res.Running || len(res.History) != 2 || res.History[0].Text != "script:hello" || res.History[1].Text != "Hello wörld 🌍" {
+		t.Fatalf("resume %+v", res)
+	}
+
+	// Closed, then resumed: claude starts again with --resume.
+	wantOK(t, c.request("session/close", map[string]string{"sessionId": r.SessionID}))
+	m = c2.request("session/resume", map[string]string{"sessionId": r.SessionID, "cwd": cwd, "claudePath": fakeClaude})
+	wantOK(t, m)
+	json.Unmarshal(m.Result, &res)
+	if res.Running || len(res.History) != 2 {
+		t.Fatalf("resume after close %+v", res)
+	}
+	prompt(t, c2, r.SessionID, "again")
+	if got := turnText(c2.untilIdle(r.SessionID)); got != "You said: again" {
+		t.Fatalf("text %q", got)
+	}
+	logged, _ := os.ReadFile(argsLog)
+	lines := strings.Split(strings.TrimSpace(string(logged)), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], "--session-id "+r.SessionID) || !strings.Contains(lines[1], "--resume "+r.SessionID) {
+		t.Fatalf("starts:\n%s", logged)
+	}
+
+	// Unknown, malformed or outside the project.
+	wantCode(t, c2.request("session/resume", map[string]string{"sessionId": "aaaaaaaa-2222-4333-8444-555555555555",
+		"cwd": cwd, "claudePath": fakeClaude}), protocol.UnknownSession)
+	wantCode(t, c2.request("session/resume", map[string]string{"sessionId": "../x", "cwd": cwd,
+		"claudePath": fakeClaude}), protocol.InvalidParams)
+	wantCode(t, c2.request("session/resume", map[string]string{"sessionId": r.SessionID, "cwd": t.TempDir(),
+		"claudePath": fakeClaude}), protocol.UnknownSession)
+	wantCode(t, c2.request("session/list", map[string]string{"cwd": "relative"}), protocol.InvalidParams)
+}

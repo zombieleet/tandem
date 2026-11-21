@@ -19,6 +19,8 @@
 // SIGINT during a turn ends it as Claude Code does: an error_during_execution
 // result, then exit 0. FAKE_CLAUDE_VERSION sets the --version output, and
 // FAKE_CLAUDE_ARGS_LOG names a file that gets one line of arguments per start.
+// With CLAUDE_CONFIG_DIR set it keeps a transcript there as Claude Code
+// does: the prompts, Claude's messages and the tool results.
 package main
 
 import (
@@ -133,6 +135,9 @@ func main() {
 			initDone = true
 		}
 		busy.Store(true)
+		cwd, _ := os.Getwd()
+		transcript(map[string]any{"type": "user", "cwd": cwd, "sessionId": sessionID,
+			"message": map[string]any{"role": "user", "content": msg.Message.Content}})
 		turn(msg.Message.Content, args)
 		busy.Store(false)
 	}
@@ -562,15 +567,47 @@ func streamEvent(id string, event map[string]any) map[string]any {
 }
 
 func assistant(id string, block map[string]any) {
-	emit(map[string]any{"type": "assistant", "parent_tool_use_id": nil, "session_id": sessionID,
+	m := map[string]any{"type": "assistant", "parent_tool_use_id": nil, "session_id": sessionID,
 		"message": map[string]any{"id": id, "type": "message", "role": "assistant",
-			"content": []map[string]any{block}, "stop_reason": nil}})
+			"content": []map[string]any{block}, "stop_reason": nil}}
+	emit(m)
+	transcript(m)
 }
 
 func toolResult(id, content string, isError bool) {
-	emit(map[string]any{"type": "user", "parent_tool_use_id": nil, "session_id": sessionID,
+	m := map[string]any{"type": "user", "parent_tool_use_id": nil, "session_id": sessionID,
 		"message": map[string]any{"role": "user", "content": []map[string]any{
-			{"tool_use_id": id, "type": "tool_result", "content": content, "is_error": isError}}}})
+			{"tool_use_id": id, "type": "tool_result", "content": content, "is_error": isError}}}}
+	emit(m)
+	transcript(m)
+}
+
+// transcript adds rec to the conversation's file under CLAUDE_CONFIG_DIR.
+func transcript(rec map[string]any) {
+	config := os.Getenv("CLAUDE_CONFIG_DIR")
+	if config == "" || sessionID == "" {
+		return
+	}
+	cwd, _ := os.Getwd()
+	var dir strings.Builder
+	for _, r := range cwd {
+		if r < 128 && (r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			dir.WriteRune(r)
+		} else {
+			dir.WriteByte('-')
+		}
+	}
+	path := filepath.Join(config, "projects", dir.String())
+	if os.MkdirAll(path, 0o700) != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(path, sessionID+".jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	line, _ := json.Marshal(rec)
+	f.Write(append(line, '\n'))
 }
 
 func result(subtype string, isError bool, extra map[string]any) {

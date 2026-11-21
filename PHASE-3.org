@@ -165,12 +165,34 @@ starts.
   uses "Your selection in Emacs"
 - [X] "Give me the outline of <file>": "Outline …"
 
-* TODO M5 · Reopen earlier chats [0/3]
-- [ ] =M-x claude-pair-resume=: the project's earlier chats, with title,
-  age and cost
-- [ ] The chosen one reopens with its conversation drawn again, and goes
-  on where it stopped
-- [ ] Chats still running in the daemon reattach after an Emacs restart
+* DONE M5 · Reopen earlier chats [3/3]
+- [X] =M-x claude-pair-resume=: the project's earlier chats, newest first,
+  with title (Claude Code's own, else the first prompt), age, number of
+  messages and cost; chats from Claude Code in a terminal too
+- [X] The chosen one reopens with its conversation drawn again (your
+  messages without what mentions attached, Claude's text with code in
+  colour, tool lines with ✓ or ✗), and goes on with =claude --resume=
+- [X] Chats still open in the daemon reattach after an Emacs restart:
+  =claude-pair= does it by itself when the project has no chat buffer;
+  =C-u= starts a new one. The daemon reads Claude Code's transcripts
+  (=session/list=, =session/resume=, protocol 0.12.0);
+  =CLAUDE_CONFIG_DIR= is now forwarded with the credentials
+** Auto
+- [X] Go: reading transcripts (titles, costs, prompts, thinking and
+  subagents left out, tool failures, joined text, bad IDs, other folders);
+  list, reattach, resume with =--resume= through the daemon; the fake
+  claude now keeps transcripts. ERT: reopen a closed chat and go on;
+  reattach after a simulated restart; pick from the list, newest first;
+  nothing to reopen; ages (6 tests). =make check= clean (220 ERT tests)
+** Live check run by Claude (21 Nov 2026, your login, about $0.28)
+- [X] Told Claude a word, closed the chat, reopened it from the list
+  ("just now · 1 message · $0.12"), asked for the word: "PELICAN"
+** Visual gate (your turn)
+- [X] =M-x claude-pair-resume= in =badger=: your earlier chats, newest
+  first, with age and cost; pick one: its conversation is drawn again;
+  ask a follow-up: Claude remembers
+- [X] Open a chat, restart Emacs, =C-c c P=: the same chat comes back
+  with "Reattached"
 
 * TODO M6 · Slash commands [0/2]
 - [ ] Spike: which slash commands the headless =claude= runs (built-in and
