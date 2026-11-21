@@ -3,4 +3,4 @@ package version
 
 // Version is the claude-paird release version. Release builds stamp it with
 // -ldflags "-X github.com/victory/claude-pair/daemon/internal/version.Version=…".
-var Version = "0.3.0"
+var Version = "0.4.0"

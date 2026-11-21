@@ -7,7 +7,7 @@ edits reviewed hunk by hunk in your real buffers, the lines Claude wrote kept
 in colour, windows Claude opens for you within limits you set, and what
 Emacs knows (diagnostics, definitions, your selection) for Claude to ask.
 
-**Status:** phase 3 (context) is done. You can chat with Claude about a
+**Status:** phase 4 (ecosystem) is done. You can chat with Claude about a
 project, watch its tool calls, stop an answer, and allow or deny each
 command. You review every edit Claude proposes in the file's own buffer,
 hunk by hunk, from keys or a small popup next to the hunk, and ask Claude
@@ -17,9 +17,13 @@ windows without ever taking your cursor. Point Claude at files, buffers
 and regions with `@`; Claude asks Emacs for diagnostics, definitions,
 outlines and your selection itself. Reopen earlier chats, run slash
 commands, and go back to before any message, files included. Code in the
-chat is in colour. Windows support is built and tested under Wine. See
-[PHASE-1.org](PHASE-1.org), [PHASE-2.org](PHASE-2.org) and
-[PHASE-3.org](PHASE-3.org).
+chat is in colour. Windows support is built and tested under Wine. With
+Magit, stage only Claude's hunks and have Claude draft the commit
+message; Claude's lines travel with the repository in git notes. Plan
+in an Org buffer you edit, send Org subtrees as tasks, ask from Embark,
+and run several Claudes at once, one per git worktree, from a dashboard.
+See [PHASE-1.org](PHASE-1.org), [PHASE-2.org](PHASE-2.org),
+[PHASE-3.org](PHASE-3.org) and [PHASE-4.org](PHASE-4.org).
 
 ## Requirements
 
@@ -48,7 +52,7 @@ and put it on your `PATH` as `claude-paird` (`claude-paird.exe` on Windows):
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS        # macOS: shasum -a 256 -c --ignore-missing SHA256SUMS
-install -m 755 claude-paird-0.3.0-linux-amd64 ~/.local/bin/claude-paird
+install -m 755 claude-paird-0.4.0-linux-amd64 ~/.local/bin/claude-paird
 ```
 
 On macOS, a downloaded binary is quarantined until you run `xattr -d
@@ -100,6 +104,9 @@ emacs -Q -L ~/src/claude-pair/lisp --eval "(require 'claude-pair)"
 | `M-x claude-pair-worktree` | Make a git worktree on a new branch, with its own chat |
 | `M-x claude-pair-plan` | Give Claude a task to plan first; you edit the plan in Org (`/plan` in the chat) |
 | `M-x claude-pair-org-send-subtree` | Send the Org subtree at point as a task; the answer goes under it |
+| `M-x claude-pair-magit-stage-claude` | Stage only the hunks you accepted from Claude |
+| `M-x claude-pair-magit-draft-message` | In a commit message buffer: Claude writes the message from the diff and the chat |
+| `M-x claude-pair-notes-share` | Share Claude's git notes with a remote: fetch theirs, push yours |
 | `M-x claude-pair-ask` | Ask Claude about the region, or the function or line at point (`@claude …`) |
 | `M-x claude-pair-review` | List every hunk waiting for your review |
 | `M-x claude-pair-set-review-style` | Choose how Claude's edits wait for you: blocking, deferred, auto-accept |
@@ -551,6 +558,10 @@ likely to change:
 | `claude-pair-attribution-persist` | t | Remember Claude's lines after a file is closed |
 | `claude-pair-instructions` | simple English, correct technical terms | Standing instructions Claude follows in every answer; empty for none |
 | `claude-pair-resume-limit` | 50 | Most earlier chats `claude-pair-resume` lists |
+| `claude-pair-magit-model` | `"haiku"` | Model that drafts commit messages; nil for Claude Code's default |
+| `claude-pair-magit-trailer` | nil | Trailer for commits holding Claude's lines, such as `Co-Authored-By: …`; none by default |
+| `claude-pair-notes-automatic` | t | Write a git note on each Magit commit, and read notes on files you open |
+| `claude-pair-worktree-directory` | `"{repo}.worktrees/{name}"` | Where `claude-pair-worktree` puts a new worktree |
 | `claude-pair-tools-wait` | 3 | Seconds a diagnostics call waits for Flymake or Flycheck to finish |
 | `claude-pair-markdown-modes` | common languages | Major modes for the languages named after ```` ``` ```` in the chat |
 | `claude-pair-model` | nil | Model for new chats, such as `"opus"`; nil for Claude Code's default |
@@ -598,7 +609,7 @@ and `daemon/internal/version`; pushing it builds the daemons and publishes them.
 | `protocol/PROTOCOL.md` | The contract between the two |
 | `test/` | ERT tests, shared helpers and the checkdoc runner |
 | `daemon/internal/testutil/fakeclaude` | A stand-in for Claude Code that the tests drive; it never calls a model |
-| `PHASE-1.org`, `PHASE-2.org`, `PHASE-3.org` | The checklists of each phase, with automatic and visual tests |
+| `PHASE-1.org` … `PHASE-4.org` | The checklists of each phase, with automatic and visual tests |
 | `.github/workflows/` | CI (`make check` on Linux and macOS, Emacs 29.1 and 30.1; the daemon's tests on Windows) and releases |
 
 ## License

@@ -174,18 +174,53 @@ work across worktrees and machines, then evil keys for others.
   for that file's entry (or move the folder away), kill the buffer, open
   the file again: Claude's lines are coloured again
 
-* TODO M5 · Remote daemon [0/2]
-- [ ] Spike: the daemon on another host over SSH, with TRAMP paths
-- [ ] Chat about a project on a remote machine from your local Emacs
+* DONE M8 · Phase 4 wrap-up [3/3]
+- [X] README: status and intro say phase 4; the commands table has the
+  Magit, notes, chats, worktree, plan and Org commands; new options
+  (=claude-pair-magit-model=, =claude-pair-magit-trailer= nil by default,
+  =claude-pair-notes-automatic=, =claude-pair-worktree-directory=);
+  sections for plans in Org, Org tasks and Embark, git notes, several
+  chats, Magit; load at startup. Protocol document at 0.17.0
+  (=permissionMode=, =updatedInput=, =session/all=)
+- [X] Version 0.4.0 in the package, the client and the daemon; =make
+  check= clean (249 tests, 3 skipped without packages; all 252 with your
+  Doom packages); =make dist= builds =claude-paird 0.4.0= for Linux, macOS
+  and Windows. M5 and M7 postponed and M6 dropped, under "Later"
+- [X] Your sign-off (22 Nov 2026)
+** Visual gate (your turn)
+- [X] Skim the README's status and the sections "Plans you edit in Org",
+  "Org tasks and Embark", "Claude's lines in git notes", "Several chats
+  at once" and "Commits with Magit": anything unclear or wrong?
 
-* TODO M6 · ACP adapter [0/2]
-- [ ] Spike: what the Agent Client Protocol needs from the daemon
-- [ ] Editors that speak ACP drive claude-paird
-
-* TODO M7 · evil keys [0/1]
-- [ ] evil-collection style bindings for the chat, review and popup
-
-* TODO M8 · Phase 4 wrap-up [0/3]
-- [ ] README and protocol document
-- [ ] =make check= clean
-- [ ] Your sign-off
+* Later
+** M5 · Remote daemon (postponed 22 Nov 2026, your choice)
+- Spike, by design only: no SSH host to test against here (no sshd,
+  Docker or remote hosts in your SSH config)
+- The way: the daemon runs on the remote host, where the files and
+  =claude= are; Emacs starts it there over SSH and talks to it through
+  =ssh HOST claude-paird bridge= (a new subcommand copying the socket to
+  stdio), with remote paths mapped to TRAMP paths
+  (=/home/u/p/x.go= ↔ =/ssh:HOST:/home/u/p/x.go=)
+- The cost: one daemon connection per host instead of one (about 17 call
+  sites in nine modules), path translation in proposals, opened files,
+  Emacs tools, mentions, history, rewind and notes; on the remote, a
+  =claude-paird= built for it and Claude Code logged in
+- To pick it up: an SSH host to test on (a server you use, or
+  =openssh-server= on this machine for =ssh localhost=)
+** M6 · ACP adapter (dropped 22 Nov 2026, your choice)
+- ACP, the Agent Client Protocol, lets any editor that speaks it use any
+  agent that speaks it (Zed, JetBrains, Neovim, Emacs's agent-shell;
+  Claude Code, Gemini CLI, Codex). claude-pair has its own protocol for
+  Emacs only, with what ACP has no place for (review in buffers, colours,
+  Emacs tools, rewind)
+- Spike: an official Claude adapter exists (=claude-agent-acp=), and
+  claude-pair's features are Emacs Lisp that would not reach other
+  editors through ACP, so a =claude-paird acp= would mostly repeat it
+** M7 · evil keys (postponed 22 Nov 2026, your choice: you do not use evil)
+- Written, not tested: branch =p4-m7-evil= (commit 8f19c49) has
+  =claude-pair-evil.el= (chat starts in insert state; =i a A o= to the
+  composer, =[[ ]]= between messages; the lists in normal state with
+  their letters, =x= closes a chat, =W= worktree; =ZZ= / =ZQ= in the
+  plan) and 3 tests that need evil
+- To pick it up: evil to test with (download it, or =apt install
+  elpa-evil=), run the tests, merge the branch
