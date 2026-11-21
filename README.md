@@ -4,16 +4,22 @@ Pair-program with Claude inside Emacs. Claude runs in a background daemon,
 `claude-paird`, written in Go, which drives your installed Claude Code (`claude`)
 in its headless stream-json mode. Emacs is the client: a chat buffer, Claude's
 edits reviewed hunk by hunk in your real buffers, the lines Claude wrote kept
-in colour, and windows Claude opens for you within limits you set.
+in colour, windows Claude opens for you within limits you set, and what
+Emacs knows (diagnostics, definitions, your selection) for Claude to ask.
 
-**Status:** phase 2 (review) is done. You can chat with Claude about a
+**Status:** phase 3 (context) is done. You can chat with Claude about a
 project, watch its tool calls, stop an answer, and allow or deny each
 command. You review every edit Claude proposes in the file's own buffer,
 hunk by hunk, from keys or a small popup next to the hunk, and ask Claude
-about a hunk before deciding. Claude's lines keep a colour until someone
-else edits them, across restarts, and `claude-pair-blame` says who wrote a
-line. Claude shows you files in up to 5 windows without ever taking your
-cursor. See [PHASE-1.org](PHASE-1.org) and [PHASE-2.org](PHASE-2.org).
+about a hunk, or any code, before deciding. Claude's lines keep a colour
+until someone else edits them, and Claude shows you files in up to 5
+windows without ever taking your cursor. Point Claude at files, buffers
+and regions with `@`; Claude asks Emacs for diagnostics, definitions,
+outlines and your selection itself. Reopen earlier chats, run slash
+commands, and go back to before any message, files included. Code in the
+chat is in colour. Windows support is built and tested under Wine. See
+[PHASE-1.org](PHASE-1.org), [PHASE-2.org](PHASE-2.org) and
+[PHASE-3.org](PHASE-3.org).
 
 ## Requirements
 
@@ -37,12 +43,12 @@ cd ~/src/claude-pair && make daemon      # daemon/bin/claude-paird
 ```
 
 The package finds a daemon built there by itself. Or download a prebuilt one
-for Linux or macOS (amd64 or arm64) from the releases page, check it, and put
-it on your `PATH` as `claude-paird`:
+for Linux, macOS or Windows (amd64 or arm64) from the releases page, check it,
+and put it on your `PATH` as `claude-paird` (`claude-paird.exe` on Windows):
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS        # macOS: shasum -a 256 -c --ignore-missing SHA256SUMS
-install -m 755 claude-paird-0.2.0-linux-amd64 ~/.local/bin/claude-paird
+install -m 755 claude-paird-0.3.0-linux-amd64 ~/.local/bin/claude-paird
 ```
 
 On macOS, a downloaded binary is quarantined until you run `xattr -d
@@ -82,11 +88,14 @@ emacs -Q -L ~/src/claude-pair/lisp --eval "(require 'claude-pair)"
 
 | Command | What it does |
 |---|---|
-| `M-x claude-pair` | Chat with Claude about the current project (`C-u` starts a new session) |
+| `M-x claude-pair` | Chat with Claude about the current project; reattaches a chat still open in the daemon (`C-u` starts a new one) |
+| `M-x claude-pair-resume` | Reopen an earlier chat about the project, with its conversation |
+| `M-x claude-pair-rewind` | Go back to before one of your messages: files and conversation |
 | `M-x claude-pair-ask` | Ask Claude about the region, or the function or line at point (`@claude …`) |
 | `M-x claude-pair-review` | List every hunk waiting for your review |
 | `M-x claude-pair-set-review-style` | Choose how Claude's edits wait for you: blocking, deferred, auto-accept |
 | `M-x claude-pair-blame` | Say who wrote the line at point (`C-u`: every run of Claude's lines) |
+| `M-x claude-pair-slash-refresh` | Read the slash commands again, after you add one |
 | `M-x claude-pair-connect` | Connect, starting the daemon if it isn't running |
 | `M-x claude-pair-daemon-status` | Show the daemon's version, pid, uptime and clients |
 | `M-x claude-pair-events-buffer` | Show every message exchanged with the daemon |
@@ -102,6 +111,7 @@ In the chat buffer, type after the `❯` prompt:
 | `C-c C-p` | Answer Claude's oldest permission question from a menu |
 | `C-c C-r` | Send your review of deferred edits to Claude now |
 | `@` then `C-M-i`, or `C-c @` | Point Claude at a file, `@buffer`, `@region` or `@diagnostics` (see below) |
+| `/` then `C-M-i` | A slash command: Claude Code's, yours, `/clear`, `/resume`, `/rewind` (see [Slash commands](#slash-commands)) |
 | `M-p` / `M-n` | Step through messages you sent earlier |
 
 In a message, `@` points Claude at something you have in Emacs:
@@ -444,6 +454,9 @@ likely to change:
 | `claude-pair-attribution-ignore-whitespace` | t | A Claude line whose only change is whitespace keeps its colour |
 | `claude-pair-attribution-persist` | t | Remember Claude's lines after a file is closed |
 | `claude-pair-instructions` | simple English, correct technical terms | Standing instructions Claude follows in every answer; empty for none |
+| `claude-pair-resume-limit` | 50 | Most earlier chats `claude-pair-resume` lists |
+| `claude-pair-tools-wait` | 3 | Seconds a diagnostics call waits for Flymake or Flycheck to finish |
+| `claude-pair-markdown-modes` | common languages | Major modes for the languages named after ```` ``` ```` in the chat |
 | `claude-pair-model` | nil | Model for new chats, such as `"opus"`; nil for Claude Code's default |
 | `claude-pair-environment-variables` | credentials, provider, proxies | Variables each new chat takes from Emacs |
 | `claude-pair-claude-command` | nil | Path of `claude`; nil looks on `exec-path` |
@@ -467,9 +480,11 @@ likely to change:
 ## Development
 
 ```sh
-make check    # go vet, gofmt, versions, byte-compile, checkdoc, Go tests (race detector), ERT tests
+make check    # go vet (Linux, macOS, Windows), gofmt, versions, byte-compile, checkdoc,
+              # Go tests (race detector; the server's over TCP too), ERT tests over a socket and over TCP
               # (no test calls the model: they use daemon/bin/fakeclaude)
-make dist     # static daemons for Linux and macOS, amd64 and arm64, with SHA256SUMS, in dist/
+make test-wine  # the daemon's tests built for Windows, run under Wine
+make dist     # static daemons for Linux, macOS and Windows, amd64 and arm64, with SHA256SUMS, in dist/
 make help     # every target
 ```
 
@@ -485,8 +500,8 @@ and `daemon/internal/version`; pushing it builds the daemons and publishes them.
 | `protocol/PROTOCOL.md` | The contract between the two |
 | `test/` | ERT tests, shared helpers and the checkdoc runner |
 | `daemon/internal/testutil/fakeclaude` | A stand-in for Claude Code that the tests drive; it never calls a model |
-| `PHASE-1.org`, `PHASE-2.org` | The checklists of each phase, with automatic and visual tests |
-| `.github/workflows/` | CI (`make check` on Linux and macOS, Emacs 29.1 and 30.1) and releases |
+| `PHASE-1.org`, `PHASE-2.org`, `PHASE-3.org` | The checklists of each phase, with automatic and visual tests |
+| `.github/workflows/` | CI (`make check` on Linux and macOS, Emacs 29.1 and 30.1; the daemon's tests on Windows) and releases |
 
 ## License
 

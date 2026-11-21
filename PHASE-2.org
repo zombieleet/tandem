@@ -248,14 +248,14 @@ check, and a milestone is committed before the next one starts.
 - [X] Skim the README's "Reviewing edits", "Claude's lines keep their
   colour" and "Configuration": anything unclear or wrong?
 
-* Noted for phase 3 (your ideas, 20 Nov 2026)
-- [ ] Ask about any selection: select code anywhere, =@claude explain
+* Noted for phase 3 (your ideas, 20 Nov 2026), built there
+- [X] (phase 3, M2) Ask about any selection: select code anywhere, =@claude explain
   this= / =do this=; it goes to the chat with the file, lines and code,
   and the answer also shows as a note above the selection
-- [ ] Project root without git: look upwards for =CLAUDE.md=,
+- [X] (phase 3, M1) Project root without git: look upwards for =CLAUDE.md=,
   =AGENTS.md=, =.claude/= or common project files (=package.json=,
   =go.mod=, …), stopping before your home folder; if none, ask, with the
   file's folder as the default; never =~= or =/= without asking
   (=claude-pair-project-markers=)
-- [ ] Optionally, in a repo, offer a subdirectory that has its own
+- [X] (phase 3, M1, =nearest-instructions=) Optionally, in a repo, offer a subdirectory that has its own
   =CLAUDE.md= as the root (monorepos); git root stays the default

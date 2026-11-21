@@ -3,7 +3,7 @@
 ;; Copyright (C) 2026 Victory
 
 ;; Author: Victory <osikwemhev@gmail.com>
-;; Version: 0.2.0
+;; Version: 0.3.0
 ;; Package-Requires: ((emacs "29.1") (jsonrpc "1.0.25"))
 ;; Keywords: tools, convenience
 ;; URL: https://github.com/victory/claude-pair

@@ -296,7 +296,25 @@ starts.
   claude-pair-stop-daemon=, then a chat: it runs over TCP, as it will on
   Windows
 
-* TODO M9 · Phase 3 wrap-up [0/3]
-- [ ] README and protocol document
-- [ ] =make check= clean
-- [ ] Your sign-off
+* DONE M9 · Phase 3 wrap-up [3/3]
+- [X] README read through as a newcomer: intro and status now say phase
+  3; the commands table has =claude-pair-resume=, =claude-pair-rewind=,
+  =claude-pair-slash-refresh=; the keys table has =/=; new options
+  (=claude-pair-resume-limit=, =claude-pair-tools-wait=,
+  =claude-pair-markdown-modes=, =claude-pair-daemon-transport=); Install
+  and Development cover the Windows daemon, =make test-wine= and the TCP
+  runs; a "Windows" section says what is tested and what is not. Protocol
+  document at 0.15.0: every method and update kind the daemon has is in
+  it. CI: a Windows job runs the daemon's tests over TCP (it runs once
+  there is a GitHub remote). The phase 3 ideas noted in PHASE-2.org are
+  marked built
+- [X] Version 0.3.0 in the package, the client and the daemon; =make
+  check= clean (vet for 3 OSes, Go with the race detector and over TCP,
+  228 ERT tests over a socket and over TCP); =make dist= builds
+  =claude-paird 0.3.0= for Linux, macOS and Windows; the Windows one runs
+  under Wine
+- [X] Your sign-off (21 Nov 2026)
+** Visual gate (your turn)
+- [X] Skim the README's status, "Asking about any code", "Reopening
+  earlier chats", "Going back to an earlier turn", "Slash commands" and
+  "Windows": anything unclear or wrong?

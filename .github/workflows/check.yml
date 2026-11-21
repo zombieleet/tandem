@@ -1,6 +1,7 @@
 # make check on Linux and macOS, on the oldest Emacs the package supports
-# and the current one. The tests never call a model: they use the fake
-# claude in daemon/internal/testutil/fakeclaude.
+# and the current one, and the daemon's tests on Windows, over TCP as it
+# runs there. The tests never call a model: they use the fake claude in
+# daemon/internal/testutil/fakeclaude.
 name: check
 
 on:
@@ -25,3 +26,20 @@ jobs:
         with:
           version: ${{ matrix.emacs }}
       - run: make check
+
+  daemon-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: daemon
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: daemon/go.mod
+          cache-dependency-path: daemon/go.sum
+      - run: go vet ./...
+      - run: go test -count=1 ./...
+        env:
+          CPD_TEST_TCP: "1"
