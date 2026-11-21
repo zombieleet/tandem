@@ -133,3 +133,38 @@ func TestEmacsLeavingEndsTheCall(t *testing.T) {
 		return strings.Contains(string(data), "mcp__emacs__list_windows -> error=true Emacs disconnected before it answered.")
 	})
 }
+
+func TestReadingToolsAreRelayedWithTheirPaths(t *testing.T) {
+	d := startDaemon(t, 0, "cpd-")
+	c := ready(t, d)
+	dir := project(t)
+	id := createSessionIn(t, c, dir)
+	prompt(t, c, id, "script:mcp:xref:{\"symbol\":\"area\",\"path\":\"a.txt\",\"line\":4} && "+
+		"diagnostics: && imenu:{\"path\":\"/etc/passwd\"} && selection:")
+	p := c.nextNotification("tool/call")
+	args := p["args"].(map[string]any)
+	if p["tool"] != "xref" || args["path"] != filepath.Join(dir, "a.txt") || args["symbol"] != "area" || args["line"] != 4.0 {
+		t.Fatalf("xref call %v", p)
+	}
+	wantOK(t, answerTool(c, p["requestId"].(string), "a.txt:1: def area", false))
+	p = c.nextNotification("tool/call")
+	if p["tool"] != "diagnostics" || p["args"].(map[string]any)["path"] != nil {
+		t.Fatalf("diagnostics without a path: %v", p)
+	}
+	wantOK(t, answerTool(c, p["requestId"].(string), "no diagnostics", false))
+	// imenu outside the project never reaches Emacs.
+	p = c.nextNotification("tool/call")
+	if p["tool"] != "selection" {
+		t.Fatalf("after the refused imenu, want selection: %v", p)
+	}
+	wantOK(t, answerTool(c, p["requestId"].(string), "geo.py line 3", false))
+	got := turnText(c.untilIdle(id))
+	if !strings.Contains(got, "imenu result: claude-pair only reads files inside the project") {
+		t.Fatalf("text %q", got)
+	}
+	for _, u := range []string{"xref result: a.txt:1: def area", "diagnostics result: no diagnostics", "selection result: geo.py line 3"} {
+		if !strings.Contains(got, u) {
+			t.Fatalf("text %q lacks %q", got, u)
+		}
+	}
+}

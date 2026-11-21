@@ -33,11 +33,18 @@ const (
 	OpenFileToolName    = "mcp__" + ServerName + "__open_file"
 	CloseWindowToolName = "mcp__" + ServerName + "__close_window"
 	ListWindowsToolName = "mcp__" + ServerName + "__list_windows"
+
+	DiagnosticsToolName = "mcp__" + ServerName + "__diagnostics"
+	XrefToolName        = "mcp__" + ServerName + "__xref"
+	ImenuToolName       = "mcp__" + ServerName + "__imenu"
+	SelectionToolName   = "mcp__" + ServerName + "__selection"
 )
 
-// LayoutToolNames are the window tools. They change only what the user
-// sees, never a file, so they run without asking.
-var LayoutToolNames = []string{OpenFileToolName, CloseWindowToolName, ListWindowsToolName}
+// LayoutToolNames are the window tools and the tools that read what Emacs
+// knows. They change only what the user sees, never a file, so they run
+// without asking.
+var LayoutToolNames = []string{OpenFileToolName, CloseWindowToolName, ListWindowsToolName,
+	DiagnosticsToolName, XrefToolName, ImenuToolName, SelectionToolName}
 
 // IsLayoutTool reports whether name is one of LayoutToolNames.
 func IsLayoutTool(name string) bool {
@@ -62,6 +69,27 @@ type CloseWindowArgs struct {
 
 // ListWindowsArgs are list_windows' inputs: none.
 type ListWindowsArgs struct{}
+
+// DiagnosticsArgs are diagnostics' inputs.
+type DiagnosticsArgs struct {
+	Path string `json:"path,omitempty" jsonschema:"The file to check; omit it for every file of the project open in Emacs"`
+}
+
+// XrefArgs are xref's inputs.
+type XrefArgs struct {
+	Symbol string `json:"symbol" jsonschema:"The name to look up, such as a function, type or variable"`
+	Path   string `json:"path" jsonschema:"A file where the symbol appears, absolute or relative to the project root"`
+	Line   int    `json:"line,omitempty" jsonschema:"The line in that file where the symbol appears, counting from 1"`
+	Kind   string `json:"kind,omitempty" jsonschema:"definitions (the default) or references"`
+}
+
+// ImenuArgs are imenu's inputs.
+type ImenuArgs struct {
+	Path string `json:"path" jsonschema:"The file to outline, absolute or relative to the project root"`
+}
+
+// SelectionArgs are selection's inputs: none.
+type SelectionArgs struct{}
 
 // EditArgs are edit_file's inputs, the same as Claude Code's built-in Edit.
 type EditArgs struct {
@@ -195,6 +223,45 @@ func Run(ctx context.Context, socketPath, sessionID string, log *slog.Logger) er
 			"the one the user is working in, and the ones you opened and may close.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ ListWindowsArgs) (*mcp.CallToolResult, any, error) {
 		return emacs(ctx, "list_windows", map[string]any{})
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "diagnostics",
+		Description: "Lists the errors and warnings that the user's Emacs reports for a file: its checker " +
+			"(Flymake or Flycheck) and, when one runs, the language server. Without a path, lists them for " +
+			"every file of the project open in Emacs. Read-only; use it after editing to see what broke.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, a DiagnosticsArgs) (*mcp.CallToolResult, any, error) {
+		args := map[string]any{}
+		if a.Path != "" {
+			args["path"] = a.Path
+		}
+		return emacs(ctx, "diagnostics", args)
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "xref",
+		Description: "Finds where a symbol is defined, or every place it is used, through Emacs's xref and the " +
+			"language server (Eglot or lsp-mode) when one runs: more precise than grep, since it knows the " +
+			"language. Give the symbol, a file where it appears and, if you know it, the line.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, a XrefArgs) (*mcp.CallToolResult, any, error) {
+		args := map[string]any{"symbol": a.Symbol, "path": a.Path, "kind": a.Kind}
+		if a.Line > 0 {
+			args["line"] = a.Line
+		}
+		return emacs(ctx, "xref", args)
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "imenu",
+		Description: "Lists the outline of a file as Emacs's major mode sees it: classes, functions, " +
+			"sections and the like, each with its line. Cheaper than reading a big file to find your way.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, a ImenuArgs) (*mcp.CallToolResult, any, error) {
+		return emacs(ctx, "imenu", map[string]any{"path": a.Path})
+	})
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "selection",
+		Description: "Says where the user is in Emacs right now: the file and line of their cursor, the " +
+			"lines on their screen, and the text they have selected, if any. Use it when they say " +
+			"\"this\" or \"here\".",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ SelectionArgs) (*mcp.CallToolResult, any, error) {
+		return emacs(ctx, "selection", map[string]any{})
 	})
 	return server.Run(ctx, &mcp.StdioTransport{})
 }

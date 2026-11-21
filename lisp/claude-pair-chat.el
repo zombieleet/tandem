@@ -49,6 +49,7 @@
 ;;; Code:
 
 (require 'claude-pair-layout)
+(require 'claude-pair-markdown)
 (require 'claude-pair-project)
 (require 'claude-pair-rpc)
 (require 'claude-pair-review)
@@ -165,6 +166,9 @@ without being repeated.  Empty for none."
 (defvar-local claude-pair-chat--cost 0 "Cost of the session so far, in US dollars.")
 (defvar-local claude-pair-chat--tools nil "Map from tool call id to the marker of its status mark.")
 (defvar-local claude-pair-chat--replying nil "Non-nil once Claude's answer to the last message has begun.")
+
+(defvar-local claude-pair-chat--markdown-start nil
+  "Marker where Claude's text not yet rendered as Markdown begins, or nil.")
 (defvar-local claude-pair-chat--after-tool nil "Non-nil when the transcript ends with a tool line.")
 (defvar-local claude-pair-chat--history nil "Ring of sent messages.")
 (defvar-local claude-pair-chat--history-index nil "Position in the history ring, or nil.")
@@ -346,7 +350,13 @@ always start a new session."
   (setq buffer-undo-list nil)
   (when session-id
     (puthash session-id (current-buffer) claude-pair-chat--buffers))
-  (add-hook 'kill-buffer-hook #'claude-pair-chat--on-kill nil t))
+  (add-hook 'kill-buffer-hook #'claude-pair-chat--on-kill nil t)
+  (add-hook 'after-change-functions #'claude-pair-chat--draft-changed nil t))
+
+(defun claude-pair-chat--draft-changed (_beg end _length)
+  "Format the composer's code again after a change that ends at END."
+  (when (and claude-pair-chat--input (>= end claude-pair-chat--input))
+    (claude-pair-markdown-render-draft claude-pair-chat--input (point-max))))
 
 ;;;; Commands
 
@@ -658,6 +668,9 @@ when the daemon refused a path outside the project."
     (setq claude-pair-chat--queue nil)
     (while items
       (let ((item (pop items)))
+        ;; Text before anything else is complete: render it before the next piece is drawn.
+        (unless (eq (car item) 'text)
+          (claude-pair-chat--render-markdown t))
         (pcase (car item)
           ('text
            (let ((text (cdr item)))
@@ -675,7 +688,9 @@ when the daemon refused a path outside the project."
           ('edit (claude-pair-chat--draw-edit (cdr item)))
           ('edit-done (claude-pair-chat--draw-edit-done (cdr item)))
           ('edit-deferred (claude-pair-chat--draw-edit-deferred (cdr item)))
-          ('permission-done (claude-pair-chat--draw-permission-done (cdr item))))))))
+          ('permission-done (claude-pair-chat--draw-permission-done (cdr item))))))
+    ;; Text still streaming: render what is complete so far.
+    (claude-pair-chat--render-markdown nil)))
 
 (defalias 'claude-pair-chat--shift-undo #'claude-pair-review-shift-undo
   "Move undo positions past a transcript change.
@@ -724,11 +739,24 @@ the buffer do not strip them."
     (setq claude-pair-chat--replying t
           claude-pair-chat--after-tool nil)))
 
+(defun claude-pair-chat--render-markdown (final)
+  "Render Claude's text since the last rendering as Markdown.
+With FINAL, the text is complete: render all of it and start afresh."
+  (when claude-pair-chat--markdown-start
+    (let ((done (claude-pair-markdown-render claude-pair-chat--markdown-start
+                                             claude-pair-chat--output final)))
+      (if final
+          (progn (set-marker claude-pair-chat--markdown-start nil)
+                 (setq claude-pair-chat--markdown-start nil))
+        (set-marker claude-pair-chat--markdown-start done)))))
+
 (defun claude-pair-chat--draw-user (text)
   "Add your message TEXT to the transcript."
   (claude-pair-chat--fresh-line)
-  (claude-pair-chat--insert "\n" (propertize "You" 'face 'claude-pair-chat-you) "\n"
-                            (funcall claude-pair-chat-show-user-function text) "\n")
+  (claude-pair-chat--insert "\n" (propertize "You" 'face 'claude-pair-chat-you) "\n")
+  (let ((start (marker-position claude-pair-chat--output)))
+    (claude-pair-chat--insert (funcall claude-pair-chat-show-user-function text) "\n")
+    (claude-pair-markdown-render start (marker-position claude-pair-chat--output) t))
   (setq claude-pair-chat--replying nil
         claude-pair-chat--after-tool nil))
 
@@ -739,6 +767,8 @@ the buffer do not strip them."
     (claude-pair-chat--fresh-line)
     (claude-pair-chat--insert "\n")
     (setq claude-pair-chat--after-tool nil))
+  (unless claude-pair-chat--markdown-start
+    (setq claude-pair-chat--markdown-start (copy-marker claude-pair-chat--output)))
   (claude-pair-chat--insert text))
 
 (defun claude-pair-chat--draw-tool-start (id title)

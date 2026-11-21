@@ -20,7 +20,12 @@ import (
 // EmacsToolTimeout is how long Emacs has to answer a window tool call.
 var EmacsToolTimeout = 30 * time.Second
 
-var emacsTools = map[string]bool{"open_file": true, "close_window": true, "list_windows": true}
+var emacsTools = map[string]bool{"open_file": true, "close_window": true, "list_windows": true,
+	"diagnostics": true, "xref": true, "imenu": true, "selection": true}
+
+// toolsWithPaths read a file the daemon must keep inside the project; the
+// verb says so in the refusal.
+var toolsWithPaths = map[string]string{"open_file": "shows", "diagnostics": "reads", "xref": "reads", "imenu": "reads"}
 
 type pendingTool struct {
 	id     string
@@ -39,7 +44,7 @@ func (d *Daemon) callEmacs(ctx context.Context, c *client, params json.RawMessag
 	}
 	if len(params) == 0 || json.Unmarshal(params, &p) != nil || p.SessionID == "" || !emacsTools[p.Tool] {
 		return nil, rpc.Errorf(protocol.InvalidParams,
-			`helper/emacs needs a sessionId and a tool of "open_file", "close_window" or "list_windows"`)
+			`helper/emacs needs a sessionId and one of Emacs's tools: open_file, close_window, list_windows, diagnostics, xref, imenu, selection`)
 	}
 	if p.Args == nil {
 		p.Args = map[string]any{}
@@ -53,19 +58,23 @@ func (d *Daemon) callEmacs(ctx context.Context, c *client, params json.RawMessag
 	if e == nil {
 		return failed("claude-pair has no such session.")
 	}
-	if p.Tool == "open_file" {
+	if verb, ok := toolsWithPaths[p.Tool]; ok {
 		path, _ := p.Args["path"].(string)
-		if path == "" {
-			return failed("open_file needs a path.")
+		switch {
+		case path == "" && p.Tool == "diagnostics":
+			// Every open file of the project.
+		case path == "":
+			return failed(p.Tool + " needs a path.")
+		default:
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(e.s.Cwd(), path)
+			}
+			full, err := insideProject(e.s.Cwd(), path, verb)
+			if err != nil {
+				return failed(err.Error())
+			}
+			p.Args["path"] = full
 		}
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(e.s.Cwd(), path)
-		}
-		full, err := insideProject(e.s.Cwd(), path, "shows")
-		if err != nil {
-			return failed(err.Error())
-		}
-		p.Args["path"] = full
 	}
 	if asker == nil {
 		return failed("No Emacs is connected, so there are no windows to work with.")

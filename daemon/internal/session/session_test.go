@@ -255,7 +255,7 @@ func TestHelperFlags(t *testing.T) {
 	for _, want := range []string{
 		`--mcp-config {"mcpServers":{"emacs":{"args":["mcp","--socket","/run/d.sock","--session","abc"],"command":"/bin/claude-paird","timeout":86400000,"type":"stdio"}}}`,
 		"--permission-prompt-tool mcp__emacs__permission",
-		"--allowedTools mcp__emacs__edit_file,mcp__emacs__write_file,mcp__emacs__open_file,mcp__emacs__close_window,mcp__emacs__list_windows",
+		"--allowedTools mcp__emacs__edit_file,mcp__emacs__write_file,mcp__emacs__open_file,mcp__emacs__close_window,mcp__emacs__list_windows,mcp__emacs__diagnostics,mcp__emacs__xref,mcp__emacs__imenu,mcp__emacs__selection",
 		"--append-system-prompt " + EditingPrompt,
 	} {
 		if !strings.Contains(args, want) {
@@ -454,6 +454,12 @@ func TestToolTitles(t *testing.T) {
 		{"mcp__emacs__open_file", map[string]any{"path": "src/a.go"}, "Show src/a.go"},
 		{"mcp__emacs__close_window", map[string]any{"window": 3.0}, "Close window 3"},
 		{"mcp__emacs__list_windows", map[string]any{}, "List windows"},
+		{"mcp__emacs__diagnostics", map[string]any{"path": "/work/proj/src/a.go"}, "Diagnostics src/a.go"},
+		{"mcp__emacs__diagnostics", map[string]any{}, "Diagnostics of open files"},
+		{"mcp__emacs__xref", map[string]any{"symbol": "area", "kind": "references"}, "Xref references of area"},
+		{"mcp__emacs__xref", map[string]any{"symbol": "area"}, "Xref definitions of area"},
+		{"mcp__emacs__imenu", map[string]any{"path": "/work/proj/geo.py"}, "Outline geo.py"},
+		{"mcp__emacs__selection", map[string]any{}, "Your selection in Emacs"},
 		{"Mystery", map[string]any{}, "Mystery"},
 		{"ToolSearch", map[string]any{"query": "select:mcp__emacs__edit_file"}, "ToolSearch select:mcp__emacs__edit_file"},
 		{"mcp__emacs__edit_file", map[string]any{"file_path": "/work/proj/a.txt"}, "Edit a.txt"},

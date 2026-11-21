@@ -111,13 +111,59 @@ starts.
 - [X] =@diagnostics= in a file with errors: Claude knows them
 - [X] Your message shows its mentions as buttons; click one
 
-* TODO M4 · Claude sees what Emacs knows [0/4]
-- [ ] =diagnostics=: Flymake or Flycheck errors and warnings of a file
-- [ ] =xref=: definitions and references through Eglot or LSP, more
-  precise than grep
-- [ ] =imenu=: the outline of a file
-- [ ] =selection=: what you have selected and where you are; all
-  read-only, so they never ask
+* DONE M4 · Claude sees what Emacs knows [4/4]
+- [X] =diagnostics=: a file's Flymake or Flycheck errors and warnings (the
+  checker is run and given up to 3 s), or every open project file's
+- [X] =xref=: definitions or references through Eglot, lsp-mode or the
+  mode's backend, with the line found when the backend gives none (Emacs
+  Lisp's); no backend: Claude is told to use grep, and no TAGS prompt
+  ever appears
+- [X] =imenu=: the outline of a file, nested names joined with " > "
+- [X] =selection=: file, line and column of your cursor, the lines on
+  your screen, and your selected text in a fence; from the chat, the
+  window you were in. All read-only, in =--allowedTools= (protocol
+  0.11.0); the system prompt tells Claude they exist
+** Auto
+- [X] ERT: diagnostics from a real Flymake backend, open files, no
+  checker; xref through Emacs Lisp's backend; no backend without a TAGS
+  prompt; imenu; a missing file as an error result; selection with and
+  without a region and from the chat; for real through the daemon (9
+  tests); Go: relaying with paths, refusing one outside the project,
+  titles; =make check= clean (206 ERT tests)
+** Live check run by Claude (21 Nov 2026, your login, about $0.25)
+- [X] Asked for an outline, where =area= is used and where the cursor
+  is, without naming tools: Claude loaded =imenu=, =xref= and =selection=
+  itself; the outline and the cursor (line 9, column 14) were right; xref
+  said there is no language server, and Claude used grep, explaining the
+  term in plain words
+** Found by you
+- [X] "Where is InitSPIDisplay defined and who calls it?" in your badger
+  project: Claude answered with grep, though lsp-mode (gopls) ran there
+  and xref answered exactly (screen.go:39, called only from main.go:16).
+  The system prompt only listed xref; it now tells Claude to call xref
+  first for definitions and uses, and grep only when xref says there is no
+  language server. Live check: Claude now loads xref for that question.
+  Tool answers are sent without the editor's colour properties
+- [X] You asked for code in the chat to look like code: =inline code=
+  in a code face (backticks hidden, kept for copying) and fenced blocks
+  coloured by the language's mode on a block background
+  (claude-pair-markdown.el), in your messages and Claude's, while it
+  streams; mode hooks held back. 7 ERT tests; screenshot in a headless
+  window (Python coloured, inline code, tool line untouched); go-mode in
+  your Emacs colours without starting lsp-mode
+- [X] You saw your message coloured only once sent: the composer is now
+  formatted as you type, backticks dimmed rather than hidden so the
+  cursor never jumps over them (1 more ERT test; screenshot of a typed
+  draft)
+** Visual gate (your turn)
+- [X] Ask anything that gets code back: =inline code= and ```` ``` ````
+  blocks show in colour; type `x` in the composer: coloured at once
+- [X] In a project with a language server (Eglot or lsp-mode), ask "where
+  is X defined and who calls it?": the chat shows "Xref …" lines
+- [X] Break something in a file, ask Claude to check it: "Diagnostics …"
+- [X] Select code and ask "what does this do?" without @region: Claude
+  uses "Your selection in Emacs"
+- [X] "Give me the outline of <file>": "Outline …"
 
 * TODO M5 · Reopen earlier chats [0/3]
 - [ ] =M-x claude-pair-resume=: the project's earlier chats, with title,

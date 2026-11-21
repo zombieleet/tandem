@@ -285,6 +285,39 @@ edit proposal or permission question comes to you, since Claude is waiting
 for you, except when you are in another tab than Claude's: then your tab is
 left alone and the echo area tells you to switch (`C-x t o`).
 
+## Code in the chat
+
+The chat shows code the way Markdown means it, in your messages and in
+Claude's answers, and while you type:
+
+- `` `inline code` `` gets a code colour, and its backticks are hidden.
+  They stay in the text, so copying keeps them. In the message you are
+  typing they are only dimmed, so the cursor never jumps over them.
+- A fenced block (```` ```python ````, ```` ```go ````, …) is coloured by
+  that language's own major mode, on its own background, with the fence
+  lines dimmed. The mode's hooks never run, so no language server or
+  linter starts just to colour a snippet. A language with no mode in your
+  Emacs keeps the background only; `claude-pair-markdown-modes` maps more
+  names to modes.
+
+While Claude writes, each finished line is formatted at once, and a block
+is coloured as soon as its closing fence arrives.
+
+## What Emacs tells Claude
+
+Claude can ask Emacs for what it knows beyond the text of files. These
+tools only read, so they never ask you:
+
+| Tool | What Claude learns |
+|---|---|
+| `diagnostics` | A file's errors and warnings from Flymake or Flycheck, the language server's included, or those of every open file of the project |
+| `xref` | Where a symbol is defined, or every place it is used, through Eglot, lsp-mode or the mode's own backend; without one, Claude is told to use grep |
+| `imenu` | A file's outline: classes, functions, sections, with their lines |
+| `selection` | Where you are: the file and line of your cursor, the lines on your screen, and the text you have selected |
+
+A file Claude asks about is opened if it is not, with unsafe local
+variables ignored, so its mode and checker can run.
+
 ## Permission questions
 
 When Claude wants to run a command, fetch a page or use another tool that

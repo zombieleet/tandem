@@ -64,7 +64,11 @@ const EditingPrompt = "You are running inside claude-pair, which connects you to
 	"To show the user a file or the lines you are talking about, call " + mcphelper.OpenFileToolName +
 	" with a line; do not open files only to read them. The user's Emacs keeps at most 5 windows; " +
 	mcphelper.ListWindowsToolName + " lists them and " + mcphelper.CloseWindowToolName +
-	" closes the ones you opened."
+	" closes the ones you opened. Emacs also knows things grep does not. To find where a symbol is " +
+	"defined or where it is used, call " + mcphelper.XrefToolName + " first: when the user's Emacs runs a " +
+	"language server it answers exactly, and it tells you when there is none; only then use grep. " +
+	"Call " + mcphelper.DiagnosticsToolName + " after editing to see errors, " + mcphelper.ImenuToolName +
+	" for a file's outline, and " + mcphelper.SelectionToolName + " when the user says \"this\" or \"here\"."
 
 // helperTimeoutMs is how long one MCP call may take: 24 hours.
 const helperTimeoutMs = 24 * 60 * 60 * 1000

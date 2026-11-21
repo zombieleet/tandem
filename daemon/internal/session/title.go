@@ -56,6 +56,21 @@ func ToolTitle(name string, input map[string]any, cwd string) string {
 		return "Close a window"
 	case "mcp__emacs__list_windows":
 		return "List windows"
+	case "mcp__emacs__diagnostics":
+		if p := str("path"); p != "" {
+			return "Diagnostics " + relative(p, cwd)
+		}
+		return "Diagnostics of open files"
+	case "mcp__emacs__xref":
+		kind := str("kind")
+		if kind == "" {
+			kind = "definitions"
+		}
+		return "Xref " + kind + " of " + str("symbol")
+	case "mcp__emacs__imenu":
+		return "Outline " + relative(str("path"), cwd)
+	case "mcp__emacs__selection":
+		return "Your selection in Emacs"
 	default:
 		if server, tool, ok := strings.Cut(strings.TrimPrefix(name, "mcp__"), "__"); ok && strings.HasPrefix(name, "mcp__") {
 			return server + ": " + tool

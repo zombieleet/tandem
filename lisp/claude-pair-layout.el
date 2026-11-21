@@ -384,14 +384,20 @@ Claude may close only windows marked Claude's.\n"
                  (cons (format "Closed window %d. %s" id (claude-pair-layout--count-text frame)) nil))
         (error (cons (format "Emacs could not close window %d: %s" id (error-message-string err)) t)))))))
 
+(defvar claude-pair-layout-tools
+  (list (cons "open_file" #'claude-pair-layout--open-file)
+        (cons "close_window" (lambda (args session _root) (claude-pair-layout--close-window args session)))
+        (cons "list_windows" (lambda (_args session root) (claude-pair-layout--list-windows session root))))
+  "Claude's Emacs tools: an alist from name to function.
+Each function takes the call's ARGS, SESSION and project ROOT and
+returns (TEXT . ERROR).")
+
 (defun claude-pair-layout--run (tool args session root)
   "Run Claude's TOOL with ARGS for SESSION in project ROOT.
 Return (TEXT . ERROR)."
-  (pcase tool
-    ("open_file" (claude-pair-layout--open-file args session root))
-    ("close_window" (claude-pair-layout--close-window args session))
-    ("list_windows" (claude-pair-layout--list-windows session root))
-    (_ (cons (format "Emacs has no tool %s." tool) t))))
+  (if-let* ((fn (cdr (assoc tool claude-pair-layout-tools))))
+      (funcall fn args session root)
+    (cons (format "Emacs has no tool %s." tool) t)))
 
 (defun claude-pair-layout--call (params)
   "Answer the tool call in PARAMS with tool/result."

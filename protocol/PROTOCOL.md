@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.10.0**. This document is the contract between the Emacs client
+Version **0.11.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -267,18 +267,24 @@ review itself is the question, and no permission rule can skip it.
 
 ## Windows
 
-Claude shows the user files through three more helper tools, in
-`--allowedTools` because they change only what the user sees:
+Claude shows the user files, and reads what Emacs knows, through more
+helper tools, in `--allowedTools` because they change only what the user
+sees:
 
 | Tool | Inputs |
 |---|---|
 | `open_file` | `path` (absolute, or relative to the project), `line` (optional, from 1) |
 | `close_window` | `window`, an id from `list_windows` or `open_file` |
 | `list_windows` | none |
+| `diagnostics` | `path` (optional: without it, every open file of the project) |
+| `xref` | `symbol`, `path` (a file where it appears), `line` (optional), `kind`: `definitions` or `references` |
+| `imenu` | `path` |
+| `selection` | none |
 
 1. The helper sends `helper/emacs` `{sessionId, tool, args}` and waits.
-2. For `open_file` the daemon makes `path` absolute and refuses, as an error
-   result, one outside the session's directory (symbolic links resolved).
+2. For a tool with a `path` the daemon makes it absolute and refuses, as an
+   error result, one outside the session's directory (symbolic links
+   resolved).
 3. The daemon sends the notification `tool/call` `{requestId, sessionId,
    tool, args, root}` to the client that answers for the session; `root` is
    the session's directory.
