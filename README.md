@@ -296,6 +296,29 @@ edit proposal or permission question comes to you, since Claude is waiting
 for you, except when you are in another tab than Claude's: then your tab is
 left alone and the echo area tells you to switch (`C-x t o`).
 
+## Commits with Magit
+
+With Magit installed, `claude-pair-magit.el` loads by itself:
+
+- `M-x claude-pair-magit-stage-claude` stages the hunks you accepted from
+  Claude, and only those: the changes whose new lines are all Claude's
+  coloured lines, and new files that are all Claude's. Your own changes
+  stay unstaged, for a commit of their own. Lines Claude only removed
+  cannot be told from yours, and files with unsaved changes are left
+  alone. It needs only git, not Magit.
+- `M-x claude-pair-magit-draft-message`, in the commit message buffer, has
+  Claude write the message from the staged diff and what was said in the
+  project's chat. Claude answers in a copy of the chat that is never saved,
+  so the chat does not change. It uses `claude-pair-magit-model` (Haiku by
+  default); `claude-pair-magit-draft-automatically` drafts whenever a
+  commit buffer opens empty.
+- No trailer is added to your commits. If you want one when the staged
+  changes hold Claude's lines, set `claude-pair-magit-trailer`, for
+  example to `"Co-Authored-By: Claude <noreply@anthropic.com>"`.
+
+Neither command has a key; bind them where you like, for example in
+`magit-status-mode-map` and `git-commit-mode-map`.
+
 ## Going back to an earlier turn
 
 Every turn is a checkpoint. `M-x claude-pair-rewind`, or `/rewind` in the
@@ -484,6 +507,8 @@ make check    # go vet (Linux, macOS, Windows), gofmt, versions, byte-compile, c
               # Go tests (race detector; the server's over TCP too), ERT tests over a socket and over TCP
               # (no test calls the model: they use daemon/bin/fakeclaude)
 make test-wine  # the daemon's tests built for Windows, run under Wine
+make test-lisp CLAUDE_PAIR_TEST_PACKAGES=~/.config/emacs/.local/straight/build-30.1
+              # also the tests that need Magit and the like, from a directory of built packages
 make dist     # static daemons for Linux, macOS and Windows, amd64 and arm64, with SHA256SUMS, in dist/
 make help     # every target
 ```

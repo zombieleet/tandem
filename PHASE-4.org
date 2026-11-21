@@ -1,0 +1,79 @@
+#+TITLE: claude-pair · Phase 4 · Ecosystem
+#+STARTUP: overview
+
+Phase 4 makes claude-pair fit the rest of Emacs and Claude Code. Each
+item ships as its own optional file: nothing loads Magit, Embark, Org or
+evil unless you use them. Each milestone has automatic tests, a visual
+check by you, and its own branch; a commit follows your "Mx passed".
+
+Order: the packages you use first (Magit, Embark with Vertico, Org), then
+work across worktrees and machines, then evil keys for others.
+
+* DONE M1 · Magit [3/3]
+- [X] =claude-pair-magit-stage-claude=: stages the hunks whose new lines
+  are all Claude's coloured lines (=git diff -U0=, a patch to the index
+  with =git apply --cached --unidiff-zero=) and new files that are all
+  Claude's; your changes, deletion-only hunks and files with unsaved
+  changes stay unstaged; Emacs lock files are ignored. Needs only git
+- [X] =claude-pair-magit-draft-message=: Claude writes the message from the
+  staged diff and the chat, as =claude -p --resume ID --fork-session
+  --no-session-persistence= (spike: the copy knows the chat, and no new
+  transcript appears), Haiku by default, put in place of the message;
+  optional automatic draft when a commit buffer opens empty
+- [X] A trailer only if you set =claude-pair-magit-trailer= (you said
+  you do not want =Co-Authored-By= in your commits, so the default is
+  none); when set, it goes in when the staged changes hold Claude's lines,
+  before git's comments, once. The file loads when =git-commit= does; the
+  two commands are autoloaded
+** Auto
+- [X] ERT (7): only Claude's hunk and new file staged, yours left; unsaved
+  files left alone; nothing of Claude's; the trailer, once and before the
+  comments; the draft replaces the message and keeps the trailer; the
+  command uses a never-saved copy of the chat; in a real =git-commit=
+  buffer the trailer appears (with Magit from =CLAUDE_PAIR_TEST_PACKAGES=;
+  skipped without). =make check= clean
+- [X] Also fixed: the tests wrote Claude's lines of their temporary files
+  into your =~/.cache/claude-pair/attribution= (1,958 files); they now use a
+  private directory, and those leftovers are removed (your 2 real files
+  stay)
+** Live check run by Claude (21 Nov 2026, Haiku, about 2 cents)
+- [X] Claude added a docstring in a chat about why; you added a line too.
+  Staging took only Claude's line. The draft: "Document that area() takes
+  a radius", with a body from the chat ("Callers kept asking whether
+  area() takes a radius or a diameter…")
+** Visual gate (your turn)
+- [X] In a project where Claude edited and you edited too: =M-x
+  claude-pair-magit-stage-claude=; Magit's status shows only Claude's
+  hunks staged
+- [X] =c c=: no trailer; =M-x claude-pair-magit-draft-message=: a message
+  appears from the diff and the chat
+
+* TODO M2 · Embark and Org [0/3]
+- [ ] Embark: "Ask Claude" on files, symbols, regions and identifiers
+- [ ] Org: send a subtree to Claude as a task; the answer goes under it
+- [ ] Plan mode as an editable Org buffer: Claude plans, you edit the
+  plan, then Claude works from your version
+
+* TODO M3 · Several agents at once [0/2]
+- [ ] One chat per git worktree; a command makes a worktree and its chat
+- [ ] A dashboard of every chat: status, cost, hunks waiting, worktree
+
+* TODO M4 · Authorship in git notes [0/2]
+- [ ] On commit, Claude's lines go into =refs/notes/claude-pair=
+- [ ] On checkout, pull or clone, the colours come back from the notes
+
+* TODO M5 · Remote daemon [0/2]
+- [ ] Spike: the daemon on another host over SSH, with TRAMP paths
+- [ ] Chat about a project on a remote machine from your local Emacs
+
+* TODO M6 · ACP adapter [0/2]
+- [ ] Spike: what the Agent Client Protocol needs from the daemon
+- [ ] Editors that speak ACP drive claude-paird
+
+* TODO M7 · evil keys [0/1]
+- [ ] evil-collection style bindings for the chat, review and popup
+
+* TODO M8 · Phase 4 wrap-up [0/3]
+- [ ] README and protocol document
+- [ ] =make check= clean
+- [ ] Your sign-off

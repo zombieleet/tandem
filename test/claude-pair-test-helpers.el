@@ -9,6 +9,22 @@
 (require 'claude-pair)
 (require 'ert)
 
+;; CLAUDE_PAIR_TEST_PACKAGES names a directory of built packages (one
+;; subdirectory each, as straight.el or package.el make them), so the tests
+;; of the optional files can load Magit, Embark and the rest.
+(when-let* ((dir (getenv "CLAUDE_PAIR_TEST_PACKAGES")))
+  (dolist (package (directory-files dir t "\\`[^.]"))
+    (when (file-directory-p package)
+      (add-to-list 'load-path package))))
+
+;; Never the user's own store: Claude's lines in test files go to a
+;; private directory, removed when the tests end.
+(defconst claude-pair-test--attribution-directory (make-temp-file "cpt-attribution-" t)
+  "Where the tests keep Claude's lines.")
+(setq claude-pair-attribution-directory claude-pair-test--attribution-directory)
+(add-hook 'kill-emacs-hook
+          (lambda () (ignore-errors (delete-directory claude-pair-test--attribution-directory t))))
+
 (defun claude-pair-test--wait-for (predicate &optional timeout)
   "Wait until PREDICATE returns non-nil or TIMEOUT seconds pass.
 Return the last value of PREDICATE."

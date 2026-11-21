@@ -51,6 +51,13 @@
 (require 'claude-pair-slash)
 (require 'claude-pair-rewind)
 
+;; Optional parts: each loads only with the package it works with.
+(autoload 'claude-pair-magit-stage-claude "claude-pair-magit"
+  "Stage the hunks you accepted from Claude, and only those." t)
+(autoload 'claude-pair-magit-draft-message "claude-pair-magit"
+  "Have Claude write the commit message for what is staged." t)
+(with-eval-after-load 'git-commit (require 'claude-pair-magit))
+
 ;;;###autoload
 (defun claude-pair-connect ()
   "Connect to the claude-pair daemon, starting it if it is not running."
