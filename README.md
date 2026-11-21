@@ -3,14 +3,17 @@
 Pair-program with Claude inside Emacs. Claude runs in a background daemon,
 `claude-paird`, written in Go, which drives your installed Claude Code (`claude`)
 in its headless stream-json mode. Emacs is the client: a chat buffer, Claude's
-edits reviewed in your real buffers, and windows Claude opens for you within
-limits you set.
+edits reviewed hunk by hunk in your real buffers, the lines Claude wrote kept
+in colour, and windows Claude opens for you within limits you set.
 
-**Status:** phase 1, milestone 6 (wrap-up). You can chat with Claude about a project,
-watch its tool calls, stop an answer, allow or deny each command, review
-every edit Claude proposes in the file's own buffer before it happens, and
-let Claude show you files in up to 5 windows without ever taking your cursor.
-See [PHASE-1.org](PHASE-1.org).
+**Status:** phase 2 (review) is done. You can chat with Claude about a
+project, watch its tool calls, stop an answer, and allow or deny each
+command. You review every edit Claude proposes in the file's own buffer,
+hunk by hunk, from keys or a small popup next to the hunk, and ask Claude
+about a hunk before deciding. Claude's lines keep a colour until someone
+else edits them, across restarts, and `claude-pair-blame` says who wrote a
+line. Claude shows you files in up to 5 windows without ever taking your
+cursor. See [PHASE-1.org](PHASE-1.org) and [PHASE-2.org](PHASE-2.org).
 
 ## Requirements
 
@@ -38,7 +41,7 @@ it on your `PATH` as `claude-paird`:
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS        # macOS: shasum -a 256 -c --ignore-missing SHA256SUMS
-install -m 755 claude-paird-0.1.0-linux-amd64 ~/.local/bin/claude-paird
+install -m 755 claude-paird-0.2.0-linux-amd64 ~/.local/bin/claude-paird
 ```
 
 On macOS, a downloaded binary is quarantined until you run `xattr -d
@@ -79,6 +82,9 @@ emacs -Q -L ~/src/claude-pair/lisp --eval "(require 'claude-pair)"
 | Command | What it does |
 |---|---|
 | `M-x claude-pair` | Chat with Claude about the current project (`C-u` starts a new session) |
+| `M-x claude-pair-review` | List every hunk waiting for your review |
+| `M-x claude-pair-set-review-style` | Choose how Claude's edits wait for you: blocking, deferred, auto-accept |
+| `M-x claude-pair-blame` | Say who wrote the line at point (`C-u`: every run of Claude's lines) |
 | `M-x claude-pair-connect` | Connect, starting the daemon if it isn't running |
 | `M-x claude-pair-daemon-status` | Show the daemon's version, pid, uptime and clients |
 | `M-x claude-pair-events-buffer` | Show every message exchanged with the daemon |
@@ -92,6 +98,7 @@ In the chat buffer, type after the `❯` prompt:
 | `C-c C-c` | Send your message |
 | `C-c C-k` | Stop Claude's answer; your next message continues the conversation |
 | `C-c C-p` | Answer Claude's oldest permission question from a menu |
+| `C-c C-r` | Send your review of deferred edits to Claude now |
 | `M-p` / `M-n` | Step through messages you sent earlier |
 
 The header line shows the model, what Claude is doing, and the session's cost
@@ -138,7 +145,10 @@ claude-pair-review-dismiss-note` removes; the note shows the first
 `claude-pair-review-note-lines` lines (6).
 
 Claude hears what happened to every hunk, with your notes, once the last
-one is decided.
+one is decided. The chat shows the edit as a block with its number of
+hunks, where `y` applies all of them, `n` rejects all, `d` rejects all with
+a note and `RET` shows the first hunk. Changes at most
+`claude-pair-review-merge-gap` unchanged lines apart (2) make one hunk.
 
 `M-x claude-pair-review` lists every hunk waiting for you, across files and
 chats: file, hunk, line, size of the change, chat and how long it has
@@ -153,10 +163,7 @@ claude-pair-set-review-style`:
 |---|---|
 | `blocking` (default) | Claude waits for your decision on each edit |
 | `deferred` | Claude is told the edit waits for your review and carries on. Your decisions are kept ("1 review result for Claude" in the header) and go to Claude with your next message, or alone with `C-c C-r` in the chat |
-| `auto-accept` | Edits are applied as they arrive, still coloured as Claude's, and undone like any change | The chat shows the edit as a block with its number of
-hunks, where `y` applies all of them, `n` rejects all, `d` rejects all with
-a note and `RET` shows the first hunk. Changes at most
-`claude-pair-review-merge-gap` unchanged lines apart (2) make one hunk.
+| `auto-accept` | Edits are applied as they arrive, still coloured as Claude's, and undone like any change |
 
 An applied hunk is saved when the buffer had no unsaved changes of yours
 (`claude-pair-review-autosave`). Otherwise it stays unsaved, and Claude is
@@ -265,7 +272,7 @@ The daemon listens on `$XDG_RUNTIME_DIR/claude-pair/daemon.sock` (on macOS,
 `$TMPDIR/claude-pair-<uid>/daemon.sock`) and logs to `daemon.log` in the same
 directory, which must be private to you. It outlives Emacs and stops by
 itself after 10 minutes with no Emacs connected (reopening an earlier chat
-comes in phase 2).
+comes in phase 3).
 
 ## Configuration
 
@@ -278,7 +285,15 @@ likely to change:
 | `claude-pair-max-windows` | 5 | Most windows Claude's frame may have when Claude adds one |
 | `claude-pair-min-windows` | 2 | Fewest windows Claude leaves when it closes one |
 | `claude-pair-focus-guard-seconds` | 3 | How long after you use a window Claude leaves it alone |
+| `claude-pair-review-style` | `blocking` | How Claude's edits wait for you: `blocking`, `deferred`, `auto-accept` |
 | `claude-pair-review-autosave` | t | Save a buffer after applying Claude's edit, if it had no unsaved changes of yours |
+| `claude-pair-review-merge-gap` | 2 | Unchanged lines between two changes up to which they make one hunk |
+| `claude-pair-popup-style` | `auto` | The hunk popup: `auto`, `child-frame`, `inline`, or nil for never |
+| `claude-pair-popup-delay` | 0.3 | Seconds in a hunk before its popup opens; nil only on `M-RET` |
+| `claude-pair-author-color` | `"#d97757"` | Colour blended into Claude's lines; nil leaves the face to your theme |
+| `claude-pair-author-tint` | 0.10 | How much of it to blend in |
+| `claude-pair-attribution-ignore-whitespace` | t | A Claude line whose only change is whitespace keeps its colour |
+| `claude-pair-attribution-persist` | t | Remember Claude's lines after a file is closed |
 | `claude-pair-model` | nil | Model for new chats, such as `"opus"`; nil for Claude Code's default |
 | `claude-pair-environment-variables` | credentials, provider, proxies | Variables each new chat takes from Emacs |
 | `claude-pair-claude-command` | nil | Path of `claude`; nil looks on `exec-path` |
@@ -319,7 +334,7 @@ and `daemon/internal/version`; pushing it builds the daemons and publishes them.
 | `protocol/PROTOCOL.md` | The contract between the two |
 | `test/` | ERT tests, shared helpers and the checkdoc runner |
 | `daemon/internal/testutil/fakeclaude` | A stand-in for Claude Code that the tests drive; it never calls a model |
-| `PHASE-1.org` | The phase 1 checklist, with automatic and visual tests |
+| `PHASE-1.org`, `PHASE-2.org` | The checklists of each phase, with automatic and visual tests |
 | `.github/workflows/` | CI (`make check` on Linux and macOS, Emacs 29.1 and 30.1) and releases |
 
 ## License

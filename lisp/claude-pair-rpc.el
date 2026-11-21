@@ -45,7 +45,7 @@
   :group 'tools
   :prefix "claude-pair-")
 
-(defconst claude-pair-version "0.1.0"
+(defconst claude-pair-version "0.2.0"
   "Version of the claude-pair Emacs package.")
 
 (defvar claude-pair-rpc-protocol-version "0.9.0"

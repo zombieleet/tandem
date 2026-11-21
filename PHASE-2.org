@@ -232,10 +232,21 @@ check, and a milestone is committed before the next one starts.
 - [X] =auto-accept=: edits land at once, coloured; =C-/= undoes them
 - [X] Back to =blocking=: as before
 
-* TODO M7 · Phase 2 wrap-up [0/3]
-- [ ] README and protocol document
-- [ ] =make check= clean
-- [ ] Your sign-off: daily use with the popup and colours
+* DONE M7 · Phase 2 wrap-up [4/4]
+- [X] README read through as a newcomer: status and intro now say phase 2;
+  the commands, keys and configuration tables list what phase 2 added
+  (=claude-pair-review=, =claude-pair-blame=, review styles, =C-c C-r=, the
+  popup and colour options); fixed a table that had swallowed a
+  paragraph, and "reopening chats comes in phase 2" (it is phase 3)
+- [X] Protocol document at 0.9.0: hunks, =partial=, =question= and
+  =deferred= answers, per-session =env=
+- [X] Version 0.2.0 in the package, the client and the daemon; =make
+  versions= now checks all three; =make check= clean (174 ERT tests, Go
+  with the race detector); =make dist= builds =claude-paird 0.2.0=
+- [X] Your sign-off: daily use with hunks, the popup and the colours (21 Nov 2026)
+** Visual gate (passed 21 Nov 2026)
+- [X] Skim the README's "Reviewing edits", "Claude's lines keep their
+  colour" and "Configuration": anything unclear or wrong?
 
 * Noted for phase 3 (your ideas, 20 Nov 2026)
 - [ ] Ask about any selection: select code anywhere, =@claude explain

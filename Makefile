@@ -59,8 +59,9 @@ vet:
 ## versions: check the daemon and the Emacs package carry the same version
 versions:
 	@package="$$(sed -n 's/^;; Version: //p' lisp/claude-pair.el)"; \
-	  if [ "$$package" != "$(VERSION)" ]; then \
-	    echo "lisp/claude-pair.el says $$package, the daemon says $(VERSION)"; exit 1; fi
+	  client="$$(sed -n 's/^(defconst claude-pair-version "\(.*\)"/\1/p' lisp/claude-pair-rpc.el)"; \
+	  if [ "$$package" != "$(VERSION)" ] || [ "$$client" != "$(VERSION)" ]; then \
+	    echo "lisp/claude-pair.el says $$package, claude-pair-rpc.el $$client, the daemon $(VERSION)"; exit 1; fi
 
 print-version:
 	@echo $(VERSION)
