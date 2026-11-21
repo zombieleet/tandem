@@ -100,7 +100,19 @@ In the chat buffer, type after the `❯` prompt:
 | `C-c C-k` | Stop Claude's answer; your next message continues the conversation |
 | `C-c C-p` | Answer Claude's oldest permission question from a menu |
 | `C-c C-r` | Send your review of deferred edits to Claude now |
+| `@` then `C-M-i`, or `C-c @` | Point Claude at a file, `@buffer`, `@region` or `@diagnostics` (see below) |
 | `M-p` / `M-n` | Step through messages you sent earlier |
+
+In a message, `@` points Claude at something you have in Emacs:
+`@src/geo.py` (any file of the project), `@buffer` (the buffer you were
+last in), `@region` (the region you last had there) and `@diagnostics`
+(that buffer's Flymake or Flycheck diagnostics). Complete them after `@`
+with `completion-at-point` (`C-M-i`, or Corfu and Company as you type), or
+pick one with `C-c @`. Your message stays as you wrote it; Claude also gets
+what each mention points at: a file's path to read, a region's place and
+code, a buffer's text when it has unsaved changes, diagnostics as
+`file:line` lines. In the transcript, mentions are buttons that take you
+there.
 
 The header line shows the model, what Claude is doing, and the session's cost
 so far. Each tool call is one line: `▸` while it runs, `✓` or `✗` when done.

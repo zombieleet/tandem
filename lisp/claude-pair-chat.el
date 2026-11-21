@@ -178,6 +178,14 @@ without being repeated.  Empty for none."
   "Map from tool call id to milliseconds its question waited for you.")
 (defvar-local claude-pair-chat--refused nil
   "Tools whose question was denied or withdrawn in the current turn.")
+(defvar claude-pair-chat-text-functions nil
+  "Functions that turn your message into what Claude gets, in order.
+Each takes the text and returns it, perhaps with context added.  They
+run in the chat buffer.")
+
+(defvar claude-pair-chat-show-user-function #'identity
+  "Function that turns your message into what the transcript shows.")
+
 (defvar-local claude-pair-chat--review-results nil
   "Your decisions on deferred edits, oldest first, for your next message.
 Each is (TEXT . ID), ID being the edit's request id when TEXT asks a
@@ -373,6 +381,11 @@ always start a new session."
                          (car (split-string (ring-ref claude-pair-chat--history 0) "\n"))
                          120 nil nil "…")))))))
 
+(defun claude-pair-chat--expand (text)
+  "Return TEXT as Claude gets it, after `claude-pair-chat-text-functions'."
+  (dolist (fn claude-pair-chat-text-functions text)
+    (setq text (funcall fn text))))
+
 (defun claude-pair-chat-send ()
   "Send the composer's text to Claude."
   (interactive)
@@ -395,7 +408,8 @@ always start a new session."
             (progn
               (claude-pair-rpc-request 'session/prompt
                                        (list :sessionId claude-pair-chat--session-id
-                                             :text (claude-pair-chat--with-reviews text)))
+                                             :text (claude-pair-chat--with-reviews
+                                                    (claude-pair-chat--expand text))))
               t)
           (jsonrpc-error
            (setq claude-pair-chat--state "idle")
@@ -713,7 +727,8 @@ the buffer do not strip them."
 (defun claude-pair-chat--draw-user (text)
   "Add your message TEXT to the transcript."
   (claude-pair-chat--fresh-line)
-  (claude-pair-chat--insert "\n" (propertize "You" 'face 'claude-pair-chat-you) "\n" text "\n")
+  (claude-pair-chat--insert "\n" (propertize "You" 'face 'claude-pair-chat-you) "\n"
+                            (funcall claude-pair-chat-show-user-function text) "\n")
   (setq claude-pair-chat--replying nil
         claude-pair-chat--after-tool nil))
 

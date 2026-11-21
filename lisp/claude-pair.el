@@ -45,6 +45,7 @@
 (require 'claude-pair-popup)
 (require 'claude-pair-dashboard)
 (require 'claude-pair-ask)
+(require 'claude-pair-mention)
 
 ;;;###autoload
 (defun claude-pair-connect ()

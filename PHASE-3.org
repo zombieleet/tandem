@@ -83,12 +83,33 @@ starts.
 - [X] Ask for a change ("add error handling here"): a proposed edit comes,
   reviewed as usual
 
-* TODO M3 · Mentions in the chat [0/3]
-- [ ] Type =@= in the chat for completion: =@file= (project files),
-  =@buffer=, =@region= (the region you last had), =@diagnostics=
-- [ ] Each mention goes to Claude as context: a path to read, or the
-  text itself with its place
-- [ ] Mentions show as buttons in your message
+* DONE M3 · Mentions in the chat [3/3]
+- [X] =@= in the chat completes with =completion-at-point= (so =C-M-i=,
+  Corfu, Company): =@buffer=, =@region=, =@diagnostics= and every project
+  file; =C-c @= picks one from a menu. =@= after a word (an e-mail
+  address) is not a mention
+- [X] Each mention goes to Claude after your words as "Context the user
+  attached": a file's path to read, the region's place and code, a
+  buffer's text when unsaved (else its path), Flymake or Flycheck
+  diagnostics as =file:line: severity: message=; code tagged with its
+  language; at most 400 lines each
+- [X] Mentions show as buttons in your message (=RET= or a click goes
+  there); the attached context is not shown, only sent
+** Auto
+- [X] ERT: a file, the buffer saved and unsaved, the region, diagnostics
+  from a real Flymake backend, names once and in order, buttons,
+  completion, sending (8 tests); =make check= clean (198 ERT tests)
+** Interactive check run by Claude (terminal Emacs, real keys, fake claude)
+- [X] Selected lines 4–5 in =geo.py=, typed in the chat "explain @region
+  and look at @sr", =C-M-i= completed =@src/geo.py=; Claude got the region
+  with its code and the file's path
+** Visual gate (passed 21 Nov 2026, in your Doom Emacs)
+- [X] In the chat, type =@= and complete (with Corfu or =C-M-i=): files,
+  =@buffer=, =@region=, =@diagnostics=
+- [X] Select some code, go to the chat, ask about =@region=: Claude
+  answers about exactly that code
+- [X] =@diagnostics= in a file with errors: Claude knows them
+- [X] Your message shows its mentions as buttons; click one
 
 * TODO M4 · Claude sees what Emacs knows [0/4]
 - [ ] =diagnostics=: Flymake or Flycheck errors and warnings of a file
