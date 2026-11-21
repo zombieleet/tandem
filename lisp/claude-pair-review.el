@@ -53,6 +53,7 @@
 
 (require 'cl-lib)
 (require 'claude-pair-authorship)
+(require 'claude-pair-diff)
 (require 'claude-pair-layout)
 (require 'claude-pair-rpc)
 (require 'seq)
@@ -376,80 +377,6 @@ FOUND is a list of (BEG . END) ranges."
       (push (substring string start) lines))
     (vconcat (nreverse lines))))
 
-(defconst claude-pair-review--diff-limit 400
-  "Most line edits the diff looks for before making the rest one hunk.")
-
-(defun claude-pair-review--diff (a b)
-  "Return how line vector A becomes line vector B, as changed ranges.
-Each range is (OI OJ NI NJ): A's lines OI to OJ-1 become B's lines NI
-to NJ-1.  Lines outside the ranges are equal, in the same order."
-  (let* ((n (length a)) (m (length b)) (p 0) (s 0))
-    (while (and (< p n) (< p m) (equal (aref a p) (aref b p)))
-      (setq p (1+ p)))
-    (while (and (< s (- n p)) (< s (- m p))
-                (equal (aref a (- n 1 s)) (aref b (- m 1 s))))
-      (setq s (1+ s)))
-    (claude-pair-review--myers a p (- n s) b p (- m s))))
-
-(defun claude-pair-review--myers (a ao an b bo bm)
-  "Return the changed ranges between two spans of lines.
-The spans are the lines of vector A from AO up to AN, and of vector B
-from BO up to BM, the ends excluded.  This is Myers' O(ND) algorithm;
-past `claude-pair-review--diff-limit' edits the whole span is one range."
-  (let ((n (- an ao)) (m (- bm bo)))
-    (cond
-     ((and (zerop n) (zerop m)) nil)
-     ((or (zerop n) (zerop m)) (list (list ao an bo bm)))
-     (t
-      (let* ((limit (min (+ n m) claude-pair-review--diff-limit))
-             (off (1+ limit))
-             (v (make-vector (+ (* 2 limit) 3) 0))
-             (trace nil)
-             (found nil)
-             (d 0))
-        (while (and (not found) (<= d limit))
-          (push (copy-sequence v) trace)
-          (let ((k (- d)))
-            (while (and (not found) (<= k d))
-              (let* ((x (if (or (= k (- d))
-                                (and (/= k d) (< (aref v (+ off k -1)) (aref v (+ off k 1)))))
-                            (aref v (+ off k 1))
-                          (1+ (aref v (+ off k -1)))))
-                     (y (- x k)))
-                (while (and (< x n) (< y m) (equal (aref a (+ ao x)) (aref b (+ bo y))))
-                  (setq x (1+ x) y (1+ y)))
-                (aset v (+ off k) x)
-                (when (and (>= x n) (>= y m))
-                  (setq found t)))
-              (setq k (+ k 2))))
-          (unless found (setq d (1+ d))))
-        (if (not found)
-            (list (list ao an bo bm))
-          ;; Walk back through the snapshots, collecting the equal pairs.
-          (let ((x n) (y m) (pairs nil))
-            (dolist (snapshot trace)
-              (let* ((k (- x y))
-                     (prev-k (if (or (= k (- d))
-                                     (and (/= k d) (< (aref snapshot (+ off k -1))
-                                                      (aref snapshot (+ off k 1)))))
-                                 (1+ k)
-                               (1- k)))
-                     (prev-x (aref snapshot (+ off prev-k)))
-                     (prev-y (- prev-x prev-k)))
-                (while (and (> x prev-x) (> y prev-y))
-                  (setq x (1- x) y (1- y))
-                  (push (cons x y) pairs))
-                (setq x prev-x y prev-y d (1- d))))
-            ;; The gaps between equal pairs are the changes.
-            (let ((i 0) (j 0) (ranges nil))
-              (dolist (pair pairs)
-                (when (or (> (car pair) i) (> (cdr pair) j))
-                  (push (list (+ ao i) (+ ao (car pair)) (+ bo j) (+ bo (cdr pair))) ranges))
-                (setq i (1+ (car pair)) j (1+ (cdr pair))))
-              (when (or (< i n) (< j m))
-                (push (list (+ ao i) an (+ bo j) bm) ranges))
-              (nreverse ranges)))))))))
-
 (defun claude-pair-review--merge (ranges gap)
   "Join RANGES that are at most GAP unchanged lines apart."
   (let (out)
@@ -470,7 +397,7 @@ Each is (START END TEXT): OLD's characters START to END-1 become TEXT."
     (mapcar (lambda (r)
               (list (aref offsets (nth 0 r)) (aref offsets (nth 1 r))
                     (apply #'concat (append (seq-subseq b (nth 2 r) (nth 3 r)) nil))))
-            (claude-pair-review--merge (claude-pair-review--diff a b)
+            (claude-pair-review--merge (claude-pair-diff a b)
                                        claude-pair-review-merge-gap))))
 
 (defun claude-pair-review--occurrences (old)
@@ -797,7 +724,8 @@ With NO-SAVE, leave saving to the caller.  Return non-nil if applied."
              (id (claude-pair-authorship-record
                   :session session :request (plist-get proposal :id)
                   :file (plist-get proposal :path)
-                  :model (plist-get info :model) :turn (plist-get info :turn))))
+                  :model (plist-get info :model) :turn (plist-get info :turn)
+                  :prompt (plist-get info :prompt))))
         (plist-put proposal :author id)
         id)))
 

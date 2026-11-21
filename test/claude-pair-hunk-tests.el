@@ -32,7 +32,7 @@
     (dotimes (_ 300)
       (let* ((a (vconcat (cl-loop repeat (random 25) collect (format "%c\n" (+ ?a (random 4))))))
              (b (vconcat (cl-loop repeat (random 25) collect (format "%c\n" (+ ?a (random 4))))))
-             (ranges (claude-pair-review--diff a b)))
+             (ranges (claude-pair-diff a b)))
         (should (equal (claude-pair-test--apply-ranges a b ranges) b))
         ;; Ranges are in order and never empty on both sides.
         (let ((last -1))
@@ -44,13 +44,13 @@
 (ert-deftest claude-pair-hunk-the-diff-finds-separate-changes ()
   (let ((a ["1\n" "2\n" "3\n" "4\n" "5\n" "6\n" "7\n" "8\n"])
         (b ["1\n" "TWO\n" "3\n" "4\n" "5\n" "6\n" "7\n" "8\n" "9\n"]))
-    (should (equal (claude-pair-review--diff a b) '((1 2 1 2) (8 8 8 9))))))
+    (should (equal (claude-pair-diff a b) '((1 2 1 2) (8 8 8 9))))))
 
 (ert-deftest claude-pair-hunk-a-big-rewrite-is-one-hunk ()
-  (let* ((claude-pair-review--diff-limit 10)
+  (let* ((claude-pair-diff-limit 10)
          (a (vconcat (cl-loop for i below 50 collect (format "a%d\n" i))))
          (b (vconcat (cl-loop for i below 50 collect (format "b%d\n" i)))))
-    (should (equal (claude-pair-review--diff a b) '((0 50 0 50))))))
+    (should (equal (claude-pair-diff a b) '((0 50 0 50))))))
 
 (ert-deftest claude-pair-hunk-close-changes-merge ()
   (let ((claude-pair-review-merge-gap 2))

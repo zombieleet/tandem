@@ -350,7 +350,11 @@ always start a new session."
   (when-let* ((buffer (gethash session claude-pair-chat--buffers)))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
-        (list :model claude-pair-chat--model :turn claude-pair-chat--turns)))))
+        (list :model claude-pair-chat--model :turn claude-pair-chat--turns
+              :prompt (unless (ring-empty-p claude-pair-chat--history)
+                        (truncate-string-to-width
+                         (car (split-string (ring-ref claude-pair-chat--history 0) "\n"))
+                         120 nil nil "…")))))))
 
 (defun claude-pair-chat-send ()
   "Send the composer's text to Claude."

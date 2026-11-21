@@ -202,5 +202,107 @@ The buffer reads one / TWO / THREE / four / five."
   (should (memq #'claude-pair-authorship-refresh-face after-make-frame-functions))
   (claude-pair-authorship-refresh-face))
 
+;;;; Remembering Claude's lines
+
+(defmacro claude-pair-test-with-store (&rest body)
+  "Run BODY with a private attribution store."
+  (declare (indent 0) (debug t))
+  `(let ((claude-pair-attribution-directory
+          (expand-file-name "attribution" (claude-pair-test--private-dir)))
+         (claude-pair-attribution-persist t))
+     ,@body))
+
+(defun claude-pair-test--reopen (file)
+  "Kill FILE's buffer and visit FILE again; return the new buffer."
+  (let ((buffer (find-buffer-visiting file)))
+    (with-current-buffer buffer (set-buffer-modified-p nil))
+    (kill-buffer buffer))
+  (find-file-noselect file))
+
+(ert-deftest claude-pair-authorship-colours-survive-closing-the-file ()
+  (claude-pair-test-with-store
+    (claude-pair-test-with-claude-lines
+      ;; Applying saved the file, and with it which lines are Claude's.
+      (let ((store (claude-pair-authorship--store file)))
+        (should (file-exists-p store))
+        (should (= (logand (file-modes store) #o077) 0))
+        (should (= (logand (file-modes claude-pair-attribution-directory) #o077) 0)))
+      (with-current-buffer (claude-pair-test--reopen file)
+        (should (equal (claude-pair-test--claude-lines) '(2 3)))
+        (should (string-match-p "Claude wrote this line"
+                                (progn (claude-pair-test--goto-line 2)
+                                       (claude-pair-authorship-describe (claude-pair-authorship-at (point))))))
+        ;; Watched again: your edits still take the colour off.
+        (claude-pair-test--goto-line 3)
+        (end-of-line)
+        (insert "!")
+        (should (equal (claude-pair-test--claude-lines) '(2)))))))
+
+(ert-deftest claude-pair-authorship-lines-moved-outside-emacs-keep-their-colour ()
+  (claude-pair-test-with-store
+    (claude-pair-test-with-claude-lines
+      (kill-buffer (current-buffer))
+      ;; Outside Emacs: two lines added at the top, line THREE changed.
+      (with-temp-file file
+        (insert "new 1\nnew 2\none\nTWO\nTHREE changed\nfour\nfive\n"))
+      (with-current-buffer (find-file-noselect file)
+        (should (equal (claude-pair-test--claude-lines) '(4)))))))
+
+(ert-deftest claude-pair-authorship-no-claude-lines-no-store ()
+  (claude-pair-test-with-store
+    (claude-pair-test-with-claude-lines
+      (let ((store (claude-pair-authorship--store file)))
+        (should (file-exists-p store))
+        (claude-pair-test--goto-line 2)
+        (insert "x")
+        (claude-pair-test--goto-line 3)
+        (insert "x")
+        (let ((save-silently t)) (save-buffer))
+        (should-not (file-exists-p store))))))
+
+(ert-deftest claude-pair-authorship-a-proposal-shown-while-saving-is-not-written-down ()
+  (claude-pair-test-with-store
+    (claude-pair-test-with-claude-lines
+      (claude-pair-test--propose "e2" :kind "edit" :filePath file :oldString "one\n" :newString "ONE\nUNO\n")
+      ;; An edit of yours on a line of yours; the proposal's lines shift
+      ;; line numbers while it shows.
+      (goto-char (point-min))
+      (search-forward "four")
+      (insert "x")
+      (let ((save-silently t)) (save-buffer))
+      (claude-pair-review-reject "e2" "")
+      (with-current-buffer (claude-pair-test--reopen file)
+        (should (equal (claude-pair-test--claude-lines) '(2 3)))))))
+
+(ert-deftest claude-pair-authorship-not-remembered-when-turned-off ()
+  (claude-pair-test-with-store
+    (let ((claude-pair-attribution-persist nil))
+      (claude-pair-test-with-claude-lines
+        (should-not (file-exists-p (claude-pair-authorship--store file)))))))
+
+(ert-deftest claude-pair-authorship-blame ()
+  (claude-pair-test-with-claude-lines
+    (let ((id (progn (claude-pair-test--goto-line 2) (claude-pair-authorship-at (point)))))
+      (plist-put (claude-pair-authorship-record-of id) :model "claude-test")
+      (plist-put (claude-pair-authorship-record-of id) :turn 3)
+      (plist-put (claude-pair-authorship-record-of id) :prompt "shout")
+      (let ((text (claude-pair-authorship-describe id)))
+        (should (string-match-p "^Claude (claude-test) wrote this line, in chat s1, turn 3, " text))
+        (should (string-match-p "answering: \"shout\"\\.$" text))))
+    (should (string-match-p "it is yours" (claude-pair-authorship-describe nil)))
+    (should (equal (mapcar (lambda (r) (list (nth 0 r) (nth 1 r))) (claude-pair-authorship--runs))
+                   '((2 3))))
+    (claude-pair-blame t)
+    (with-current-buffer (format "*claude-pair blame: %s*" (buffer-name))
+      (should (string-match-p "lines 2-3  Claude" (buffer-string)))
+      (kill-buffer))))
+
+(ert-deftest claude-pair-authorship-line-map ()
+  (let ((table (claude-pair-authorship--map-lines ["a" "b" "c" "d"] ["x" "a" "b" "C" "d"])))
+    (should (equal (gethash 0 table) 1))
+    (should (equal (gethash 1 table) 2))
+    (should-not (gethash 2 table))
+    (should (equal (gethash 3 table) 4))))
+
 (provide 'claude-pair-authorship-tests)
 ;;; claude-pair-authorship-tests.el ends here

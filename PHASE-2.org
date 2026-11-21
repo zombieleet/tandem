@@ -172,14 +172,33 @@ check, and a milestone is committed before the next one starts.
   colours stay
 - [X] Switch theme (=M-x load-theme=): the tint follows
 
-* TODO M5 · Colours survive closing the file [0/3]
-- [ ] Saved under =~/.cache/claude-pair/= per project: line ranges and a
-  hash per line, on save and on kill
-- [ ] Reattached when the file is opened again; lines changed in between
-  lose their colour
-- [ ] =M-x claude-pair-blame=: who wrote this line, in which chat and turn
-** Visual gate
-- [ ] Restart Emacs, reopen a file Claude edited: colours are back
+* DONE M5 · Colours survive closing the file [3/3]
+- [X] Saved under =~/.cache/claude-pair/attribution/= (700, files 600),
+  one JSON per file: a fingerprint of every line, which lines are
+  Claude's, and their records. Written on each save (before proposed
+  text goes back in); removed when no Claude line is left
+- [X] Reattached when the file is opened: the stored fingerprints are
+  diffed against the file as it is (the M1 diff, now its own module), so
+  Claude's lines are found where they are now; lines changed in between
+  lose their colour. Matching by position in the diff, not by
+  fingerprint alone, so a stray =}= is never coloured
+- [X] =M-x claude-pair-blame=: who wrote this line: model, chat, turn,
+  time and the message it answered; with =C-u= every run in the buffer,
+  each a link
+** Auto
+- [X] ERT: surviving a reopen, lines moved and changed outside Emacs, no
+  store without Claude lines, a proposal showing during a save, the option
+  off, blame, the line map (7 tests); =make check= clean (163 ERT tests)
+** Interactive check run by Claude (terminal Emacs, real keys, fake claude)
+- [X] Applied an edit: the store was written; =C-x k= and =C-x C-f=: lines
+  2–3 coloured again; =M-x claude-pair-blame= named the model, chat, turn,
+  time and message; a fresh Emacs: lines 2–3 coloured again
+** Visual gate (passed 21 Nov 2026, in your Doom Emacs)
+- [X] Have Claude edit a file, apply, close the buffer, open it again:
+  colours back
+- [X] =systemctl --user restart emacs.service=, open the file: colours back
+- [X] =M-x claude-pair-blame= on one of Claude's lines, and =C-u M-x
+  claude-pair-blame=
 
 * TODO M6 · Review dashboard and review styles [0/3]
 - [ ] =M-x claude-pair-review=: every pending hunk across files in a

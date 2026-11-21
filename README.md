@@ -169,6 +169,18 @@ it away with the text. With `claude-pair-attribution-ignore-whitespace`
 (on), a line whose only change is whitespace keeps its colour, so
 reindenting and formatters do not wipe it.
 
+The colours outlive the buffer and Emacs itself. Each save writes, under
+`claude-pair-attribution-directory` (`~/.cache/claude-pair/attribution`,
+private to you), a fingerprint of every line of the file and which lines
+are Claude's; opening the file again finds those lines where they are now,
+even after lines were added above them, and a line changed meanwhile loses
+its colour. `claude-pair-attribution-persist` turns this off.
+
+`M-x claude-pair-blame` says who wrote the line at point: "Claude (model)
+wrote this line, in chat 1a2b3c4d, turn 3, 21 Nov 14:02, answering: "add
+docstrings"". With `C-u`, it lists every run of Claude's lines in the
+buffer, each a link to its lines.
+
 ## Claude's windows
 
 `M-x claude-pair` opens the chat in a tab of its own, named "Claude"
