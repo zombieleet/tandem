@@ -30,7 +30,10 @@ Return the last value of PREDICATE."
 Afterwards stop any daemon started there and delete the directory."
   (declare (indent 0) (debug t))
   `(let* ((dir (claude-pair-test--private-dir))
-          (claude-pair-socket-path (expand-file-name "d.sock" dir))
+          ;; CLAUDE_PAIR_TEST_TRANSPORT=tcp runs the tests as on Windows.
+          (claude-pair-daemon-transport (if (equal (getenv "CLAUDE_PAIR_TEST_TRANSPORT") "tcp") 'tcp 'unix))
+          (claude-pair-socket-path
+           (expand-file-name (if (eq claude-pair-daemon-transport 'tcp) "d.json" "d.sock") dir))
           (claude-pair-daemon-idle-timeout 60)
           (claude-pair-daemon-command nil)
           (claude-pair-rpc--connection nil)

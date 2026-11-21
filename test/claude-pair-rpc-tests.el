@@ -242,7 +242,8 @@
              "-Q" "--batch" "-L" lisp-dir
              ;; Stale .elc files would speak an older protocol.
              "--eval" "(setq load-prefer-newer t)"
-             "--eval" (format "(setq claude-pair-socket-path %S)" claude-pair-socket-path)
+             "--eval" (format "(setq claude-pair-socket-path %S claude-pair-daemon-transport '%s)"
+                              claude-pair-socket-path claude-pair-daemon-transport)
              "--eval" "(progn (require 'claude-pair) (claude-pair-connect))")))
       (should (eql status 0))
       (should (file-exists-p claude-pair-socket-path))

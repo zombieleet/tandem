@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -53,7 +54,8 @@ func CheckClaude(path string) (string, error) {
 	if err != nil {
 		return "", unavailable("cannot use claude at %s: %v", path, err)
 	}
-	if info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+	// Windows has no executable bit: any regular file may be a program.
+	if info.IsDir() || (runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0) {
 		return "", unavailable("%s is not an executable file", path)
 	}
 

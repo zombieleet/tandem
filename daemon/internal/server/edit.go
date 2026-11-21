@@ -329,9 +329,20 @@ func (d *Daemon) answerEdit(c *client, params json.RawMessage) (any, error) {
 	}
 }
 
+// onDrive makes a Windows path that starts at the root, \x or /x, absolute
+// on the drive of cwd, as Windows reads it; elsewhere it returns path.
+func onDrive(cwd, path string) string {
+	if !filepath.IsAbs(path) && filepath.VolumeName(path) == "" &&
+		(strings.HasPrefix(path, `\`) || strings.HasPrefix(path, "/")) {
+		return filepath.VolumeName(cwd) + path
+	}
+	return path
+}
+
 // insideProject returns path cleaned, or an error unless it is an absolute
 // path inside cwd. Symbolic links are resolved, so a link cannot lead out.
 func insideProject(cwd, path, verb string) (string, error) {
+	path = onDrive(cwd, path)
 	if path == "" || !filepath.IsAbs(path) {
 		return "", errors.New("file_path must be an absolute path, got " + quote(path))
 	}

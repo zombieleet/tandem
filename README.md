@@ -20,7 +20,8 @@ cursor. See [PHASE-1.org](PHASE-1.org) and [PHASE-2.org](PHASE-2.org).
 - Emacs 29.1 or later
 - Claude Code 2.1.0 or later (`claude` on your `PATH`), logged in or set up
   with an API key, Amazon Bedrock or Google Vertex AI
-- Linux or macOS
+- Linux or macOS; Windows support is built and tested under Wine, not yet
+  on a real Windows (see [Windows](#windows))
 - Go 1.24 or later, only to build the daemon yourself
 
 ## Install
@@ -403,8 +404,22 @@ Values never appear in the daemon's log.
 The daemon listens on `$XDG_RUNTIME_DIR/claude-pair/daemon.sock` (on macOS,
 `$TMPDIR/claude-pair-<uid>/daemon.sock`) and logs to `daemon.log` in the same
 directory, which must be private to you. It outlives Emacs and stops by
-itself after 10 minutes with no Emacs connected (reopening an earlier chat
-comes in phase 3).
+itself after 10 minutes with no Emacs connected; `M-x claude-pair` then
+reattaches to a chat that was still open.
+
+### Windows
+
+Emacs on Windows has no Unix sockets, so there the daemon listens on a
+port of `127.0.0.1` only, and writes the port and a secret token to
+`%LOCALAPPDATA%\claude-pair\daemon.json`. Emacs reads that file and sends
+the token; a program without it is refused. `claude-pair-daemon-transport`
+picks this (`tcp`) or a socket (`unix`); the default follows your system.
+Stopping a turn works by message instead of a signal.
+
+The Windows daemon is built (`make dist`) and its tests pass under Wine
+(`make test-wine`), and the Emacs package passes its tests over TCP on
+Linux (`make test-lisp-tcp`). It has not yet run on a real Windows: please
+report what you find.
 
 ## Configuration
 
@@ -436,6 +451,7 @@ likely to change:
 | `claude-pair-daemon-idle-timeout` | 600 | Seconds the daemon waits with no Emacs before it stops; 0 never |
 | `claude-pair-chat-window-width` | 0.38 | Width of the chat window, as a fraction of the frame or in columns |
 | `claude-pair-socket-path` | nil | The daemon's socket; nil for the default above |
+| `claude-pair-daemon-transport` | `unix`, `tcp` on Windows | How Emacs reaches the daemon: a Unix socket, or a local port with a token (see [Windows](#windows)) |
 
 ## Troubleshooting
 

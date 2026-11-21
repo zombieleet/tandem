@@ -66,7 +66,7 @@ func (d *Daemon) callEmacs(ctx context.Context, c *client, params json.RawMessag
 		case path == "":
 			return failed(p.Tool + " needs a path.")
 		default:
-			if !filepath.IsAbs(path) {
+			if path = onDrive(e.s.Cwd(), path); !filepath.IsAbs(path) {
 				path = filepath.Join(e.s.Cwd(), path)
 			}
 			full, err := insideProject(e.s.Cwd(), path, verb)

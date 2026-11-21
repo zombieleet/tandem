@@ -9,9 +9,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/victory/claude-pair/daemon/internal/endpoint"
 	"github.com/victory/claude-pair/daemon/internal/protocol"
 	"github.com/victory/claude-pair/daemon/internal/rpc"
 	"github.com/victory/claude-pair/daemon/internal/version"
@@ -114,7 +115,7 @@ type editResult struct {
 // Run serves MCP on stdin and stdout for the session sessionID until Claude
 // Code closes stdin.
 func Run(ctx context.Context, socketPath, sessionID string, log *slog.Logger) error {
-	nc, err := net.Dial("unix", socketPath)
+	nc, token, err := endpoint.Dial(socketPath, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("cannot reach claude-paird at %s: %w", socketPath, err)
 	}
@@ -129,6 +130,7 @@ func Run(ctx context.Context, socketPath, sessionID string, log *slog.Logger) er
 		"protocolVersion": protocol.Version,
 		"clientInfo":      map[string]string{"name": "claude-paird-mcp", "version": version.Version},
 		"capabilities":    map[string]any{"role": "mcp-helper", "sessionId": sessionID},
+		"token":           token,
 	}); err != nil {
 		return fmt.Errorf("claude-paird refused the helper: %w", err)
 	}

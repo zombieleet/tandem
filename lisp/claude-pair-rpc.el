@@ -48,7 +48,7 @@
 (defconst claude-pair-version "0.2.0"
   "Version of the claude-pair Emacs package.")
 
-(defvar claude-pair-rpc-protocol-version "0.14.0"
+(defvar claude-pair-rpc-protocol-version "0.15.0"
   "Protocol version this client speaks.  See protocol/PROTOCOL.md.")
 
 (defcustom claude-pair-daemon-command nil
@@ -61,8 +61,19 @@ binary that \"make daemon\" builds next to this package."
 (defcustom claude-pair-socket-path nil
   "Socket the daemon listens on, or nil for the default.
 The default is $XDG_RUNTIME_DIR/claude-pair/daemon.sock.  The
-directory holding the socket must be private to you (mode 700)."
+directory holding the socket must be private to you (mode 700).
+With `claude-pair-daemon-transport' set to tcp, this is the endpoint
+file instead, %LOCALAPPDATA%\\claude-pair\\daemon.json by default on
+Windows."
   :type '(choice (const :tag "Default" nil) file))
+
+(defcustom claude-pair-daemon-transport
+  (if (eq system-type 'windows-nt) 'tcp 'unix)
+  "How Emacs reaches the daemon.
+unix: a Unix socket.  tcp: a port on this machine only, which the
+daemon writes with a secret token to an endpoint file; Emacs on Windows
+has no Unix sockets."
+  :type '(choice (const :tag "Unix socket" unix) (const :tag "Local TCP port" tcp)))
 
 (defcustom claude-pair-daemon-idle-timeout 600
   "Seconds the daemon keeps running with no Emacs connected.
@@ -89,6 +100,9 @@ Each function receives the method (a symbol) and the params (a plist).")
 (defvar claude-pair-rpc--connection nil
   "The current `jsonrpc-process-connection' to the daemon, or nil.")
 
+(defvar claude-pair-rpc--token nil
+  "The token the daemon wants with initialize, from its endpoint file, or nil.")
+
 (defvar claude-pair-rpc--server-info nil
   "Result of the last successful initialize, as a plist.")
 
@@ -108,15 +122,19 @@ Each function receives the method (a symbol) and the params (a plist).")
 ;;;; Paths and commands
 
 (defun claude-pair-rpc-default-socket-path ()
-  "Return the default socket path.
-Keep this in step with daemon/internal/paths/paths.go."
-  (let ((xdg (getenv "XDG_RUNTIME_DIR")))
+  "Return the default socket path, or endpoint file for a TCP daemon.
+Keep this in step with daemon/internal/paths."
+  (let ((xdg (getenv "XDG_RUNTIME_DIR"))
+        (local (getenv "LOCALAPPDATA")))
     (expand-file-name
-     "daemon.sock"
-     (if (and xdg (not (string-empty-p xdg)) (file-name-absolute-p xdg))
-         (expand-file-name "claude-pair" xdg)
-       (expand-file-name (format "claude-pair-%d" (user-uid))
-                         temporary-file-directory)))))
+     (if (eq claude-pair-daemon-transport 'tcp) "daemon.json" "daemon.sock")
+     (cond
+      ((and (eq system-type 'windows-nt) local (not (string-empty-p local)))
+       (expand-file-name "claude-pair" local))
+      ((and xdg (not (string-empty-p xdg)) (file-name-absolute-p xdg))
+       (expand-file-name "claude-pair" xdg))
+      (t (expand-file-name (format "claude-pair-%d" (user-uid))
+                           temporary-file-directory))))))
 
 (defun claude-pair-rpc-socket-path ()
   "Return the socket path in use."
@@ -138,29 +156,53 @@ Signal a `user-error' when no daemon can be found."
 
 (defun claude-pair-rpc--built-daemon ()
   "Return where \"make daemon\" puts the daemon binary."
-  (expand-file-name "../daemon/bin/claude-paird" claude-pair-rpc--directory))
+  (expand-file-name (if (eq system-type 'windows-nt) "../daemon/bin/claude-paird.exe" "../daemon/bin/claude-paird")
+                    claude-pair-rpc--directory))
+
+(defun claude-pair-rpc--endpoint (path)
+  "Return the endpoint file at PATH as a plist, or nil if there is none."
+  (when (file-regular-p path)
+    (ignore-errors
+      (with-temp-buffer
+        (insert-file-contents path)
+        (json-parse-buffer :object-type 'plist)))))
 
 ;;;; Starting and connecting
 
 (defun claude-pair-rpc--open-process (path)
-  "Return a network process connected to PATH, or nil if nothing listens."
-  (when (> (string-bytes (encode-coding-string path 'utf-8))
-           claude-pair-rpc--max-socket-path-bytes)
-    (user-error "Socket path is longer than %d bytes: %s"
-                claude-pair-rpc--max-socket-path-bytes path))
-  (condition-case nil
-      (make-network-process :name "claude-pair"
-                            :family 'local
-                            :service path
-                            :coding 'utf-8-emacs-unix
-                            :noquery t)
-    (file-error nil)))
+  "Return a network process connected to PATH, or nil if nothing listens.
+PATH is a socket, or the endpoint file of a TCP daemon, whose token is
+kept for initialize."
+  (if-let* ((endpoint (claude-pair-rpc--endpoint path)))
+      (progn
+        (setq claude-pair-rpc--token (plist-get endpoint :token))
+        (condition-case nil
+            (make-network-process :name "claude-pair"
+                                  :host "127.0.0.1"
+                                  :service (plist-get endpoint :port)
+                                  :coding 'utf-8-emacs-unix
+                                  :noquery t)
+          (file-error nil)))
+    (setq claude-pair-rpc--token nil)
+    (unless (eq claude-pair-daemon-transport 'tcp)
+      (when (> (string-bytes (encode-coding-string path 'utf-8))
+               claude-pair-rpc--max-socket-path-bytes)
+        (user-error "Socket path is longer than %d bytes: %s"
+                    claude-pair-rpc--max-socket-path-bytes path))
+      (condition-case nil
+          (make-network-process :name "claude-pair"
+                                :family 'local
+                                :service path
+                                :coding 'utf-8-emacs-unix
+                                :noquery t)
+        (file-error nil)))))
 
 (defun claude-pair-rpc--start-daemon (path)
   "Start a detached daemon listening on PATH and wait until it is ready.
 Return the launcher's output."
   (let* ((command (append (claude-pair-rpc-daemon-command)
                           (list "--detach"
+                                (format "--tcp=%s" (if (eq claude-pair-daemon-transport 'tcp) "true" "false"))
                                 "--socket" path
                                 "--idle-timeout"
                                 (number-to-string claude-pair-daemon-idle-timeout)
@@ -205,6 +247,7 @@ Close CONNECTION and signal a `user-error' when the daemon refuses."
       (jsonrpc-request
        connection 'initialize
        (list :protocolVersion claude-pair-rpc-protocol-version
+             :token (or claude-pair-rpc--token "")
              :clientInfo (list :name "claude-pair.el" :version claude-pair-version)
              :capabilities (list :childFrames (if (display-graphic-p) t :json-false)
                                  :maxWindows 5))
@@ -324,12 +367,21 @@ Return non-nil if it accepted.  Daemons before protocol 0.4 refuse."
           (claude-pair-rpc--expected-disconnect t))
       (unwind-protect
           (condition-case nil
-              (progn (jsonrpc-request connection 'shutdown nil :timeout 3) t)
+              (progn (jsonrpc-request connection 'shutdown
+                                      (list :token (or claude-pair-rpc--token ""))
+                                      :timeout 3)
+                     t)
             (jsonrpc-error nil))
         (claude-pair-rpc--close connection)))))
 
 (defun claude-pair-rpc--daemon-pids (path)
   "Return the ids of your claude-paird processes listening on PATH."
+  (if-let* ((pid (plist-get (claude-pair-rpc--endpoint path) :pid)))
+      (list pid)
+    (claude-pair-rpc--daemon-pids-by-args path)))
+
+(defun claude-pair-rpc--daemon-pids-by-args (path)
+  "Return your claude-paird processes whose arguments name PATH."
   (let ((pattern (concat "--socket " (regexp-quote path) "\\( \\|\\'\\)")))
     (seq-filter
      (lambda (pid)
@@ -367,7 +419,7 @@ TIMEOUT seconds, 5 by default, and return non-nil if one was stopped."
   (when-let* ((connection (claude-pair-rpc-connection t)))
     (let ((claude-pair-rpc--expected-disconnect t)
           (deadline (+ (float-time) (or timeout 3))))
-      (jsonrpc-request connection 'shutdown nil :timeout 5)
+      (jsonrpc-request connection 'shutdown (list :token (or claude-pair-rpc--token "")) :timeout 5)
       (while (and (jsonrpc-running-p connection) (< (float-time) deadline))
         (accept-process-output nil 0.05))
       (when (jsonrpc-running-p connection)

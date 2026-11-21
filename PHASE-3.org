@@ -262,10 +262,39 @@ starts.
   shows the turns before it, your message is in the composer
 - [X] =C-/= in the file buffer takes the rewind back
 
-* TODO M8 · Windows [0/3]
-- [ ] Local TCP with a token in a private file instead of a Unix socket
-- [ ] The daemon builds and its tests pass on Windows
-- [ ] CI on Windows (needs a GitHub remote)
+* DONE M8 · Windows [2/3]
+- [X] Local TCP with a token in a private file instead of a Unix socket:
+  =--tcp= (the default on Windows) listens on =127.0.0.1= and writes
+  ={port, token, pid}= (mode 0600) where the socket would be; Emacs and the
+  MCP helper tell a socket from an endpoint file and send the token; a
+  client without it gets -32007 (protocol 0.15.0).
+  =claude-pair-daemon-transport= picks it in Emacs. Stopping a turn on
+  Windows is an =interrupt= control request on stdin (spike: Claude Code
+  ends the turn and keeps the process), with a kill after 5 s
+- [X] The daemon builds and its tests pass on Windows: =go vet= for Linux,
+  macOS and Windows; every Go test package passes as a Windows binary
+  under Wine (=make test-wine=), the server suite over TCP. Wine is not
+  Windows: a real Windows run is still to come. Found and fixed on the
+  way: =CheckClaude= wanted a Unix executable bit; a path like =\etc\hosts=
+  on Windows now means the project's drive; sessions cancel by message on
+  Windows; detaching uses Windows process flags
+- [ ] CI on Windows (needs a GitHub remote; there is none yet)
+** Auto
+- [X] Go: endpoint file, token refused and accepted, shutdown rules,
+  cancel by message keeping the process, detach over TCP; the whole server
+  suite again over TCP (=CPD_TEST_TCP=1=). ERT: the whole suite over TCP
+  (=make test-lisp-tcp=, part of =make check=). Also fixed: a chat block
+  drawn after you decided its edit lost its "· N hunks" (a flaky test)
+** Live check run by Claude (21 Nov 2026, Haiku, under 1 cent)
+- [X] Over TCP with the token and cancel by message: a long story stopped
+  mid-sentence ("Stopped."), then "Reply only OK." answered "OK" by the
+  same claude process (one start in the log)
+** Visual gate (your turn)
+- [X] Nothing changes on Linux: after the restart, a chat works as before,
+  and =C-c C-k= still stops Claude
+- [X] Optional: =(setq claude-pair-daemon-transport 'tcp)=, =M-x
+  claude-pair-stop-daemon=, then a chat: it runs over TCP, as it will on
+  Windows
 
 * TODO M9 · Phase 3 wrap-up [0/3]
 - [ ] README and protocol document

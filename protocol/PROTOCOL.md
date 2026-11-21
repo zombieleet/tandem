@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.14.0**. This document is the contract between the Emacs client
+Version **0.15.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -15,7 +15,16 @@ replaced as long as it follows this document.
   creates it with that mode, and refuses to start in an existing directory
   that is less private. The socket itself is mode `0600`.
 - The path must fit in 103 bytes (the macOS limit for socket paths).
-- Windows (TCP on `127.0.0.1` with a token) is specified in a later version.
+- **TCP** (the default on Windows, whose Emacs has no Unix sockets; with
+  `--tcp` anywhere): the daemon listens on a free port of `127.0.0.1` only,
+  and writes an endpoint file where the socket would be:
+  `{"port": N, "token": "<64 hex digits>", "pid": N}`, mode `0600`. On
+  Windows the default is `%LOCALAPPDATA%\claude-pair\daemon.json`, in a
+  directory only the user can open. A client tells the two apart by what is
+  at the path: a socket, or a regular file. Over TCP a client sends the
+  token in `initialize`, and in `shutdown` sent before it; the daemon
+  answers anything else with `-32007`. The daemon removes the file when it
+  stops, unless another daemon has written its own.
 
 ## Framing
 
@@ -73,6 +82,7 @@ Params:
 | `protocolVersion` | string | Required. `MAJOR.MINOR.PATCH` |
 | `clientInfo` | `{name, version}` | Optional |
 | `capabilities` | object | Optional. `childFrames: boolean`, `maxWindows: number` |
+| `token` | string | Required over TCP: the endpoint file's token |
 
 Result:
 
@@ -232,9 +242,13 @@ shorter `MCP_TOOL_TIMEOUT`.
 
 ### `session/cancel` (client → daemon)
 
-Params: `sessionId`. Result `{cancelled: boolean}`. The daemon sends SIGINT
-to `claude`, which ends the turn and exits; the next prompt resumes the
-session in a new process.
+Params: `sessionId`. Result `{cancelled: boolean}`. On Linux and macOS the
+daemon sends SIGINT to `claude`, which ends the turn and exits; the next
+prompt resumes the session in a new process. On Windows, which has no
+SIGINT to send (or with `--interrupt-by-message`), it writes an `interrupt`
+control request to `claude`'s stdin, which ends the turn and keeps the
+process for the next prompt. A `claude` that has not ended the turn after 5
+seconds is killed.
 
 ### `session/close` (client → daemon)
 
@@ -375,9 +389,9 @@ are described in its README.
 
 ### `shutdown` (client → daemon)
 
-No params. Result `{ok: true}`. After sending the result the daemon closes
-every connection, removes its socket and exits. Accepted before
-`initialize`.
+Params: none, or `{token}`. Result `{ok: true}`. After sending the result
+the daemon closes every connection, removes its socket or endpoint file and
+exits. Accepted before `initialize`; over TCP, only with the token then.
 
 ## Error codes
 
@@ -394,4 +408,5 @@ every connection, removes its socket and exits. Accepted before
 | `-32004` | Unknown session |
 | `-32005` | Claude Code unavailable: missing, not executable, too old, or failed to start |
 | `-32006` | Unknown permission request: answered or withdrawn already |
+| `-32007` | Unauthorized: a TCP client without the endpoint file's token |
 | `-32800` | Request cancelled with `$/cancelRequest` |

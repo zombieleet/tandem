@@ -45,7 +45,7 @@ func answerEdit(c *testClient, requestID string, a map[string]any) message {
 
 func project(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := projectDir(t)
 	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one x two\n"), 0o600)
 	return dir
 }
@@ -123,7 +123,7 @@ func TestWriteCreatesAFile(t *testing.T) {
 		t.Fatalf("proposal %v", p)
 	}
 	wantOK(t, answerEdit(c, p["requestId"].(string), map[string]any{"outcome": "applied", "saved": true, "created": true}))
-	if got := turnText(c.untilIdle(id)); got != "edit result: The user accepted the new file new/b.txt; it is created and saved." {
+	if got := turnText(c.untilIdle(id)); got != "edit result: The user accepted the new file "+filepath.FromSlash("new/b.txt")+"; it is created and saved." {
 		t.Fatalf("text %q", got)
 	}
 }
@@ -132,10 +132,19 @@ func TestEditsOutsideTheProjectAreRefused(t *testing.T) {
 	d := startDaemon(t, 0, "cpd-")
 	c := ready(t, d)
 	dir := project(t)
-	outside := t.TempDir()
-	os.Symlink(outside, filepath.Join(dir, "escape"))
+	outside := projectDir(t)
+	files := []string{"/etc/hosts", filepath.Join(dir, "..", "x.txt")}
+	// Windows lets only some users make symbolic links, and Wine reports one
+	// made that is not there.
+	if link := filepath.Join(dir, "escape"); os.Symlink(outside, link) == nil {
+		if _, err := os.Lstat(link); err != nil {
+			t.Log("no symbolic link here; that case is left out")
+		} else {
+			files = append(files, filepath.Join(dir, "escape", "x.txt"))
+		}
+	}
 	id := createSessionIn(t, c, dir)
-	for _, file := range []string{"/etc/hosts", filepath.Join(dir, "..", "x.txt"), filepath.Join(dir, "escape", "x.txt")} {
+	for _, file := range files {
 		prompt(t, c, id, editPrompt(t, map[string]any{"file": file, "old": "a", "new": "b"}))
 		updates := c.untilIdle(id)
 		if got := turnText(updates); !strings.Contains(got, "claude-pair only edits files inside the project") {
@@ -194,7 +203,7 @@ func TestOnlyTheReviewingEmacsMayAnswer(t *testing.T) {
 }
 
 func TestInsideProject(t *testing.T) {
-	dir := t.TempDir()
+	dir := projectDir(t)
 	os.MkdirAll(filepath.Join(dir, "sub"), 0o700)
 	ok := []string{filepath.Join(dir, "a.go"), filepath.Join(dir, "sub", "b.go"), filepath.Join(dir, "new", "dir", "c.go"),
 		filepath.Join(dir, "sub", "..", "d.go")}

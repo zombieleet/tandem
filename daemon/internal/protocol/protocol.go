@@ -8,7 +8,7 @@ import (
 )
 
 // Version is the protocol version this daemon speaks.
-const Version = "0.14.0"
+const Version = "0.15.0"
 
 // JSON-RPC error codes, standard and claude-pair specific.
 const (
@@ -23,6 +23,7 @@ const (
 	UnknownSession       = -32004
 	ClaudeUnavailable    = -32005
 	UnknownRequest       = -32006
+	Unauthorized         = -32007
 )
 
 // ParseVersion parses MAJOR.MINOR.PATCH.

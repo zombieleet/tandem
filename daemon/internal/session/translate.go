@@ -149,7 +149,10 @@ func (s *Session) resultEvent(p *process, event map[string]any) []Update {
 
 	cancelled := p.cancelling
 	p.turnOpen, p.streamed, p.tools = false, map[string]bool{}, map[string]toolStart{}
-	if cancelled && s.proc == p {
+	if cancelled && s.opts.InterruptByMessage {
+		// Interrupted by message, claude goes on taking prompts.
+		p.cancelling = false
+	} else if cancelled && s.proc == p {
 		// Claude Code exits after a cancelled turn; the next prompt starts a
 		// new process with --resume instead of writing to this one.
 		s.proc = nil

@@ -19,6 +19,8 @@
 // SIGINT during a turn ends it as Claude Code does: an error_during_execution
 // result, then exit 0. FAKE_CLAUDE_VERSION sets the --version output, and
 // FAKE_CLAUDE_ARGS_LOG names a file that gets one line of arguments per start.
+// An interrupt control request ends the running turn the same way, but
+// the process stays, as Claude Code's does.
 // With CLAUDE_CONFIG_DIR set it keeps a transcript there as Claude Code
 // does: the prompts, Claude's messages and the tool results.
 package main
@@ -48,6 +50,9 @@ var (
 	totalCost   float64
 	turns       int
 	interrupted atomic.Bool
+	stayAlive   atomic.Bool // the interrupt came as a control request
+	outMu       sync.Mutex
+	busy        atomic.Bool
 	msgCounter  int
 
 	mcpConfig  string
@@ -102,7 +107,6 @@ func main() {
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt)
-	busy := atomic.Bool{}
 	go func() {
 		for range sigs {
 			if !busy.Load() {
@@ -117,37 +121,49 @@ func main() {
 		}
 	}()
 
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, 64<<10), 16<<20)
+	// Stdin is read on its own, so a control request arrives during a turn.
+	prompts := make(chan string)
+	go func() {
+		defer close(prompts)
+		scanner := bufio.NewScanner(os.Stdin)
+		scanner.Buffer(make([]byte, 64<<10), 16<<20)
+		for scanner.Scan() {
+			var msg struct {
+				Type      string `json:"type"`
+				RequestID string `json:"request_id"`
+				Request   struct {
+					Subtype string `json:"subtype"`
+				} `json:"request"`
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			}
+			if json.Unmarshal(scanner.Bytes(), &msg) != nil {
+				continue
+			}
+			switch {
+			case msg.Type == "control_request" && msg.Request.Subtype == "interrupt":
+				if busy.Load() {
+					stayAlive.Store(true)
+					interrupted.Store(true)
+					callMu.Lock()
+					if callCancel != nil {
+						callCancel()
+					}
+					callMu.Unlock()
+				}
+				emit(map[string]any{"type": "control_response", "response": map[string]any{
+					"subtype": "success", "request_id": msg.RequestID,
+					"response": map[string]any{"still_queued": []any{}}}})
+			case msg.Type == "control_request":
+				controlInitialize(msg.RequestID)
+			case msg.Type == "user":
+				prompts <- msg.Message.Content
+			}
+		}
+	}()
 	initDone := false
-	for scanner.Scan() {
-		var msg struct {
-			Type      string `json:"type"`
-			RequestID string `json:"request_id"`
-			Message   struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		}
-		if json.Unmarshal(scanner.Bytes(), &msg) != nil {
-			continue
-		}
-		if msg.Type == "control_request" {
-			// initialize: the commands, as Claude Code lists them.
-			emit(map[string]any{"type": "control_response", "response": map[string]any{
-				"subtype": "success", "request_id": msg.RequestID, "response": map[string]any{
-					"commands": []map[string]any{
-						{"name": "compact", "description": "Free up context by summarizing the conversation so far",
-							"argumentHint": "<optional custom summarization instructions>", "builtin": true},
-						{"name": "clear", "description": "Start a new session with empty context",
-							"aliases": []string{"reset", "new"}, "builtin": true},
-						{"name": "doctor", "description": "Diagnose the installation", "builtin": true},
-						{"name": "greet", "description": "Greet someone by name (project)", "argumentHint": "NAME"},
-					}}}})
-			continue
-		}
-		if msg.Type != "user" {
-			continue
-		}
+	for content := range prompts {
 		if !initDone {
 			cwd, _ := os.Getwd()
 			emit(map[string]any{
@@ -161,10 +177,41 @@ func main() {
 		busy.Store(true)
 		cwd, _ := os.Getwd()
 		transcript(map[string]any{"type": "user", "cwd": cwd, "sessionId": sessionID,
-			"message": map[string]any{"role": "user", "content": msg.Message.Content}})
-		turn(msg.Message.Content, args)
+			"message": map[string]any{"role": "user", "content": content}})
+		runTurn(content, args)
 		busy.Store(false)
 	}
+}
+
+// errInterrupted unwinds a turn ended by an interrupt control request.
+var errInterrupted = errors.New("interrupted")
+
+// runTurn runs one turn; an interrupt control request ends it early, and
+// the process stays.
+func runTurn(content string, args []string) {
+	defer func() {
+		if r := recover(); r != nil && r != errInterrupted {
+			panic(r)
+		}
+		interrupted.Store(false)
+		stayAlive.Store(false)
+	}()
+	turn(content, args)
+}
+
+// controlInitialize answers the initialize control request with the
+// commands, as Claude Code lists them.
+func controlInitialize(requestID string) {
+	emit(map[string]any{"type": "control_response", "response": map[string]any{
+		"subtype": "success", "request_id": requestID, "response": map[string]any{
+			"commands": []map[string]any{
+				{"name": "compact", "description": "Free up context by summarizing the conversation so far",
+					"argumentHint": "<optional custom summarization instructions>", "builtin": true},
+				{"name": "clear", "description": "Start a new session with empty context",
+					"aliases": []string{"reset", "new"}, "builtin": true},
+				{"name": "doctor", "description": "Diagnose the installation", "builtin": true},
+				{"name": "greet", "description": "Greet someone by name (project)", "argumentHint": "NAME"},
+			}}}})
 }
 
 func turn(prompt string, args []string) {
@@ -377,6 +424,10 @@ func editScenario(name, arg string) {
 	}
 	cwd, _ := os.Getwd()
 	path := spec.File
+	if strings.HasPrefix(path, "/") && filepath.VolumeName(path) == "" && !filepath.IsAbs(path) {
+		// On Windows, /etc/hosts is on the drive of the working directory.
+		path = filepath.VolumeName(cwd) + path
+	}
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(cwd, path)
 	}
@@ -586,7 +637,12 @@ func interruptTurn(id, partial string) {
 		"message": map[string]any{"role": "user", "content": []map[string]any{
 			{"type": "text", "text": "[Request interrupted by user]"}}}})
 	result("error_during_execution", true, nil)
+	if stayAlive.Load() {
+		panic(errInterrupted)
+	}
+	outMu.Lock()
 	out.Flush()
+	outMu.Unlock()
 	if mcpSession != nil {
 		mcpSession.Close()
 	}
@@ -694,6 +750,8 @@ func emitFrom(parent string, event map[string]any) {
 
 func emit(v map[string]any) {
 	line, _ := json.Marshal(v)
+	outMu.Lock()
+	defer outMu.Unlock()
 	out.Write(line)
 	out.WriteByte('\n')
 	out.Flush()

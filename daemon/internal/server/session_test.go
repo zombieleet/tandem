@@ -3,11 +3,10 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/victory/claude-pair/daemon/internal/testutil"
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -26,12 +25,11 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	fakeClaude = filepath.Join(dir, "fakeclaude")
-	helperBinary = filepath.Join(dir, "claude-paird")
-	for out, pkg := range map[string]string{fakeClaude: "../testutil/fakeclaude", helperBinary: "../../cmd/claude-paird"} {
-		if msg, err := exec.Command("go", "build", "-o", out, pkg).CombinedOutput(); err != nil {
-			panic(fmt.Sprintf("building %s: %v\n%s", pkg, err, msg))
-		}
+	if fakeClaude, err = testutil.Binary(dir, "fakeclaude", "../testutil/fakeclaude"); err != nil {
+		panic(err)
+	}
+	if helperBinary, err = testutil.Binary(dir, "claude-paird", "../../cmd/claude-paird"); err != nil {
+		panic(err)
 	}
 	code := m.Run()
 	os.RemoveAll(dir)
@@ -66,7 +64,7 @@ func (c *testClient) untilIdle(id string) []map[string]any {
 
 func createSession(t *testing.T, c *testClient, claude string) string {
 	t.Helper()
-	m := c.request("session/new", map[string]string{"cwd": t.TempDir(), "claudePath": claude})
+	m := c.request("session/new", map[string]string{"cwd": projectDir(t), "claudePath": claude})
 	wantOK(t, m)
 	var r struct{ SessionID, ClaudeVersion string }
 	json.Unmarshal(m.Result, &r)
@@ -118,7 +116,7 @@ func TestSessionLifecycle(t *testing.T) {
 func TestSessionNewChecksItsParams(t *testing.T) {
 	d := startDaemon(t, 0, "cpd-")
 	c := ready(t, d)
-	dir := t.TempDir()
+	dir := projectDir(t)
 	file := filepath.Join(dir, "file")
 	os.WriteFile(file, nil, 0o600)
 	for _, p := range []map[string]string{
@@ -233,7 +231,7 @@ func TestSessionEnvironment(t *testing.T) {
 	t.Setenv("CP_TEST_REMOVED", "daemon")
 	d := startDaemon(t, 0, "cpd-")
 	c := ready(t, d)
-	m := c.request("session/new", map[string]any{"cwd": t.TempDir(), "claudePath": fakeClaude,
+	m := c.request("session/new", map[string]any{"cwd": projectDir(t), "claudePath": fakeClaude,
 		"env": map[string]any{"CP_TEST_SET": "from emacs", "CP_TEST_REMOVED": nil}})
 	wantOK(t, m)
 	var r struct{ SessionID string }
@@ -242,7 +240,7 @@ func TestSessionEnvironment(t *testing.T) {
 	if got := turnText(c.untilIdle(r.SessionID)); got != "CP_TEST_SET=from emacs CP_TEST_REMOVED unset CP_TEST_INHERITED=daemon" {
 		t.Fatalf("text %q", got)
 	}
-	wantCode(t, c.request("session/new", map[string]any{"cwd": t.TempDir(), "claudePath": fakeClaude,
+	wantCode(t, c.request("session/new", map[string]any{"cwd": projectDir(t), "claudePath": fakeClaude,
 		"env": map[string]any{"A=B": "x"}}), protocol.InvalidParams)
 }
 
@@ -251,7 +249,7 @@ func TestTheLogNeverHoldsEnvironmentValues(t *testing.T) {
 	var mu sync.Mutex
 	d := startDaemonWithLog(t, func(p []byte) { mu.Lock(); log.Write(p); mu.Unlock() })
 	c := ready(t, d)
-	m := c.request("session/new", map[string]any{"cwd": t.TempDir(), "claudePath": fakeClaude,
+	m := c.request("session/new", map[string]any{"cwd": projectDir(t), "claudePath": fakeClaude,
 		"env": map[string]any{"ANTHROPIC_API_KEY": "sk-secret-value"}})
 	wantOK(t, m)
 	var r struct{ SessionID string }
@@ -272,27 +270,35 @@ func (f writeFunc) Write(p []byte) (int, error) { f(p); return len(p), nil }
 // startDaemonWithLog starts a daemon whose debug log goes to write.
 func startDaemonWithLog(t *testing.T, write func([]byte)) *Daemon {
 	t.Helper()
+	name := "d.sock"
+	if overTCP {
+		name = "d.json"
+	}
 	d := New(Options{
-		SocketPath: filepath.Join(privateDir(t, "cpd-"), "d.sock"),
+		SocketPath: filepath.Join(privateDir(t, "cpd-"), name),
 		Version:    "9.9.9-test",
 		HelperPath: helperBinary,
 		Log:        slog.New(slog.NewTextHandler(writeFunc(write), &slog.HandlerOptions{Level: slog.LevelDebug})),
+		TCP:        overTCP,
 	})
 	if err := d.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { d.Stop("test cleanup") })
+	testDaemonsMu.Lock()
+	testDaemons[t] = append(testDaemons[t], d)
+	testDaemonsMu.Unlock()
 	return d
 }
 
 func TestListAndResumeAConversation(t *testing.T) {
-	config := t.TempDir()
+	config := projectDir(t)
 	t.Setenv("CLAUDE_CONFIG_DIR", config)
-	argsLog := filepath.Join(t.TempDir(), "args")
+	argsLog := filepath.Join(projectDir(t), "args")
 	t.Setenv("FAKE_CLAUDE_ARGS_LOG", argsLog)
 	d := startDaemon(t, 0, "cpd-")
 	c := ready(t, d)
-	cwd := t.TempDir()
+	cwd := projectDir(t)
 	m := c.request("session/new", map[string]string{"cwd": cwd, "claudePath": fakeClaude})
 	wantOK(t, m)
 	var r struct{ SessionID string }
@@ -352,7 +358,7 @@ func TestListAndResumeAConversation(t *testing.T) {
 		"cwd": cwd, "claudePath": fakeClaude}), protocol.UnknownSession)
 	wantCode(t, c2.request("session/resume", map[string]string{"sessionId": "../x", "cwd": cwd,
 		"claudePath": fakeClaude}), protocol.InvalidParams)
-	wantCode(t, c2.request("session/resume", map[string]string{"sessionId": r.SessionID, "cwd": t.TempDir(),
+	wantCode(t, c2.request("session/resume", map[string]string{"sessionId": r.SessionID, "cwd": projectDir(t),
 		"claudePath": fakeClaude}), protocol.UnknownSession)
 	wantCode(t, c2.request("session/list", map[string]string{"cwd": "relative"}), protocol.InvalidParams)
 }
@@ -404,8 +410,8 @@ func TestSlashCommands(t *testing.T) {
 }
 
 func TestRewindToAnEarlierTurn(t *testing.T) {
-	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
-	argsLog := filepath.Join(t.TempDir(), "args")
+	t.Setenv("CLAUDE_CONFIG_DIR", projectDir(t))
+	argsLog := filepath.Join(projectDir(t), "args")
 	t.Setenv("FAKE_CLAUDE_ARGS_LOG", argsLog)
 	d := startDaemon(t, 0, "cpd-")
 	c := ready(t, d)

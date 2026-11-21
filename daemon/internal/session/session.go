@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -48,7 +49,15 @@ type Options struct {
 	// Resume continues the conversation with ID that Claude Code already
 	// keeps on disk, instead of starting a new one.
 	Resume bool
+	// InterruptByMessage cancels a turn with an interrupt control request
+	// on claude's stdin, which ends the turn and keeps the process, instead
+	// of SIGINT, which ends the process. Windows has no SIGINT to send.
+	InterruptByMessage bool
 }
+
+// DefaultInterruptByMessage is how turns are cancelled where Options does
+// not say: by message on Windows, by SIGINT elsewhere.
+var DefaultInterruptByMessage = runtime.GOOS == "windows"
 
 var (
 	// ErrBusy means a turn is running; cancel it or wait.
@@ -129,6 +138,10 @@ func New(opts Options) *Session {
 		opts.OnIdle = func() {}
 	}
 	opts.Log = opts.Log.With("session", opts.ID)
+	if runtime.GOOS == "windows" {
+		// There is no SIGINT to send.
+		opts.InterruptByMessage = true
+	}
 	return &Session{opts: opts, resumable: opts.Resume}
 }
 
@@ -196,16 +209,44 @@ func (s *Session) Cancel() bool {
 		return false
 	}
 	p.cancelling = true
+	byMessage := s.opts.InterruptByMessage
+	if byMessage {
+		line := `{"type":"control_request","request_id":"cancel-` + fmt.Sprint(time.Now().UnixNano()) +
+			`","request":{"subtype":"interrupt"}}` + "\n"
+		if _, err := io.WriteString(p.stdin, line); err != nil {
+			byMessage = false
+		}
+	}
 	s.mu.Unlock()
 
 	s.emit(Update{"kind": "status", "state": "cancelling"})
-	_ = p.cmd.Process.Signal(os.Interrupt)
+	if !byMessage {
+		_ = p.cmd.Process.Signal(os.Interrupt)
+	}
 	go func() {
-		select {
-		case <-p.done:
-		case <-time.After(cancelGrace):
-			s.opts.Log.Warn("claude ignored SIGINT; killing it")
-			_ = p.cmd.Process.Kill()
+		deadline := time.After(cancelGrace)
+		for {
+			select {
+			case <-p.done:
+				return
+			case <-deadline:
+				s.mu.Lock()
+				stuck := p.turnOpen && p.cancelling
+				s.mu.Unlock()
+				if stuck {
+					s.opts.Log.Warn("claude did not stop the turn; killing it")
+					_ = p.cmd.Process.Kill()
+				}
+				return
+			case <-time.After(50 * time.Millisecond):
+				// A turn ended by message leaves the process running.
+				s.mu.Lock()
+				ended := !p.turnOpen
+				s.mu.Unlock()
+				if ended {
+					return
+				}
+			}
 		}
 	}()
 	return true

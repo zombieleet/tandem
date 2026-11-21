@@ -33,7 +33,9 @@ const usage = `Usage: claude-paird [options]
 Daemon that connects the claude-pair Emacs package to Claude.
 
 Options:
-  --socket PATH          Socket to listen on (default: %s)
+  --socket PATH          Socket to listen on, or with --tcp the endpoint file (default: %s)
+  --tcp                  Listen on a local TCP port instead of a Unix socket, and write
+                         the port and a token to the endpoint file (the default on Windows)
   --idle-timeout SEC     Exit after SEC seconds with no clients; 0 never exits (default: 600)
   --log-file PATH        Append the log to PATH instead of standard error
   --log-level LEVEL      debug, info, warn or error (default: info)
@@ -62,6 +64,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	logFile := flags.String("log-file", "", "")
 	logLevel := flags.String("log-level", "info", "")
 	detach := flags.Bool("detach", false, "")
+	tcp := flags.Bool("tcp", paths.DefaultTCP, "")
+	interruptByMessage := flags.Bool("interrupt-by-message", false, "")
 	ready := flags.String("ready-timeout", "10", "")
 	showVersion := flags.Bool("version", false, "")
 	if err := flags.Parse(args); err != nil {
@@ -104,10 +108,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "claude-paird: %v\n", err)
 			return 2
 		}
-		child := []string{"--socket", path, "--idle-timeout", *idle, "--log-level", *logLevel}
+		child := []string{"--socket", path, "--idle-timeout", *idle, "--log-level", *logLevel,
+			"--tcp=" + strconv.FormatBool(*tcp), "--interrupt-by-message=" + strconv.FormatBool(*interruptByMessage)}
 		return runDetached(child, path, *logFile, readyTimeout, stdout, stderr)
 	}
-	return runForeground(path, idleTimeout, *logFile, level, stderr)
+	return runForeground(server.Options{SocketPath: path, IdleTimeout: idleTimeout, TCP: *tcp,
+		InterruptByMessage: *interruptByMessage}, *logFile, level, stderr)
 }
 
 // runMCP serves the MCP helper on stdin and stdout. Its log goes to stderr,
@@ -140,7 +146,8 @@ func seconds(value, flagName string) (time.Duration, error) {
 	return time.Duration(n * float64(time.Second)), nil
 }
 
-func runForeground(path string, idleTimeout time.Duration, logFile string, level slog.Level, stderr io.Writer) int {
+func runForeground(opts server.Options, logFile string, level slog.Level, stderr io.Writer) int {
+	path := opts.SocketPath
 	out := stderr
 	if logFile != "" {
 		if err := server.PrepareSocketDir(filepath.Dir(path)); err != nil {
@@ -156,7 +163,8 @@ func runForeground(path string, idleTimeout time.Duration, logFile string, level
 		out = f
 	}
 	log := slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: level}))
-	d := server.New(server.Options{SocketPath: path, IdleTimeout: idleTimeout, Version: version.Version, Log: log})
+	opts.Version, opts.Log = version.Version, log
+	d := server.New(opts)
 	if err := d.Start(); err != nil {
 		log.Error("cannot start", "error", err)
 		fmt.Fprintf(stderr, "claude-paird: %v\n", err)
@@ -197,7 +205,7 @@ func runDetached(childArgs []string, path, logFile string, readyTimeout time.Dur
 		return 1
 	}
 	cmd := exec.Command(exe, append(childArgs, "--log-file", logFile)...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr = detachedAttr()
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(stderr, "claude-paird: %v\n", err)
 		return 1

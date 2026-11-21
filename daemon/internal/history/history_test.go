@@ -25,7 +25,11 @@ func write(t *testing.T, dir, id string, lines ...string) string {
 
 func TestProjectDir(t *testing.T) {
 	got := ProjectDir("/c", "/home/v/personal-projects/my.app_1")
-	if got != "/c/projects/-home-v-personal-projects-my-app-1" {
+	if got != filepath.Join("/c", "projects", "-home-v-personal-projects-my-app-1") {
+		t.Fatalf("got %s", got)
+	}
+	// On Windows, as Claude Code names it there.
+	if got := ProjectDir("/c", `C:\Users\v\my.app`); got != filepath.Join("/c", "projects", "C--Users-v-my-app") {
 		t.Fatalf("got %s", got)
 	}
 }

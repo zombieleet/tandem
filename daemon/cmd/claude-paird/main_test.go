@@ -5,15 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/victory/claude-pair/daemon/internal/testutil"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/victory/claude-pair/daemon/internal/endpoint"
 	"github.com/victory/claude-pair/daemon/internal/framing"
 	"github.com/victory/claude-pair/daemon/internal/protocol"
 )
@@ -26,9 +29,8 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	binary = filepath.Join(dir, "claude-paird")
-	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
-		panic(fmt.Sprintf("go build: %v\n%s", err, out))
+	if binary, err = testutil.Binary(dir, "claude-paird", "."); err != nil {
+		panic(err)
 	}
 	code := m.Run()
 	os.RemoveAll(dir)
@@ -83,52 +85,74 @@ func TestVersion(t *testing.T) {
 }
 
 func TestDetach(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Run("socket", func(t *testing.T) { testDetach(t, false) })
+	}
+	t.Run("tcp", func(t *testing.T) { testDetach(t, true) })
+}
+
+func testDetach(t *testing.T, tcp bool) {
 	dir := privateDir(t)
 	path := filepath.Join(dir, "d.sock")
-	out, errOut, code := paird(t, "--detach", "--socket", path, "--idle-timeout", "30")
+	if tcp {
+		path = filepath.Join(dir, "d.json")
+	}
+	transport := "--tcp=" + fmt.Sprint(tcp)
+	out, errOut, code := paird(t, "--detach", transport, "--socket", path, "--idle-timeout", "30")
 	m := regexp.MustCompile(`^ready (\d+) (.+)\n$`).FindStringSubmatch(out)
 	if code != 0 || m == nil || m[2] != path {
 		t.Fatalf("code %d, stdout %q, stderr %q", code, out, errOut)
 	}
 
-	out, _, code = paird(t, "--detach", "--socket", path)
+	out, _, code = paird(t, "--detach", transport, "--socket", path)
 	if code != 0 || out != "already running "+path+"\n" {
 		t.Fatalf("second --detach: code %d, output %q", code, out)
 	}
 
-	nc, err := net.Dial("unix", path)
+	nc, token, err := endpoint.Dial(path, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer nc.Close()
+	if tcp != (token != "") {
+		t.Fatalf("token %q over tcp=%v", token, tcp)
+	}
 	r := framing.NewReader(nc)
-	init := call(t, nc, r, 1, "initialize", map[string]string{"protocolVersion": protocol.Version})
+	init := call(t, nc, r, 1, "initialize", map[string]string{"protocolVersion": protocol.Version, "token": token})
 	var result struct{ PID int }
 	json.Unmarshal(init["result"], &result)
 	if fmt.Sprint(result.PID) != m[1] {
-		t.Fatalf("pid %d, launcher said %s", result.PID, m[1])
+		t.Fatalf("pid %d, launcher said %s (%s)", result.PID, m[1], init)
 	}
-	call(t, nc, r, 2, "shutdown", nil)
+	call(t, nc, r, 2, "shutdown", map[string]string{"token": token})
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		if _, err := os.Lstat(path); err != nil {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("the socket was not removed")
+			t.Fatal("the socket or endpoint file was not removed")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	log, _ := os.ReadFile(filepath.Join(dir, "daemon.log"))
+	// The log may still be open on Windows for a moment after the exit.
+	var log []byte
+	for i := 0; i < 50 && !strings.Contains(string(log), "listening"); i++ {
+		log, _ = os.ReadFile(filepath.Join(dir, "daemon.log"))
+		time.Sleep(20 * time.Millisecond)
+	}
 	if !strings.Contains(string(log), "listening") {
 		t.Fatalf("log does not mention listening:\n%s", log)
 	}
 }
 
 func TestDetachReportsUnsafeDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("about Unix file modes")
+	}
 	dir := privateDir(t)
 	os.Chmod(dir, 0o755)
-	_, errOut, code := paird(t, "--detach", "--socket", filepath.Join(dir, "d.sock"))
+	_, errOut, code := paird(t, "--detach", "--tcp=false", "--socket", filepath.Join(dir, "d.sock"))
 	if code != 1 || !strings.Contains(errOut, "other users can reach the socket") {
 		t.Fatalf("code %d, stderr %q", code, errOut)
 	}

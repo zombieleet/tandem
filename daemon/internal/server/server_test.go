@@ -10,9 +10,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/victory/claude-pair/daemon/internal/endpoint"
 	"github.com/victory/claude-pair/daemon/internal/framing"
 	"github.com/victory/claude-pair/daemon/internal/protocol"
 )
@@ -29,18 +31,66 @@ func privateDir(t *testing.T, prefix string) string {
 	return dir
 }
 
+// overTCP runs the tests on a TCP daemon, cancelling turns by message, as
+// on Windows: CPD_TEST_TCP=1.
+var overTCP = os.Getenv("CPD_TEST_TCP") == "1"
+
+// skipOverTCP skips a test about Unix sockets themselves.
+func skipOverTCP(t *testing.T) {
+	t.Helper()
+	if overTCP || runtime.GOOS == "windows" {
+		t.Skip("about Unix sockets and their modes")
+	}
+}
+
+var (
+	testDaemonsMu sync.Mutex
+	testDaemons   = map[*testing.T][]*Daemon{}
+)
+
+// projectDir returns a new directory for a test's project, removed once the
+// test's daemons have stopped: Windows refuses to delete a directory that a
+// running claude works in.
+func projectDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "cpd-project-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		testDaemonsMu.Lock()
+		daemons := testDaemons[t]
+		delete(testDaemons, t)
+		testDaemonsMu.Unlock()
+		for _, d := range daemons {
+			d.Stop("test cleanup")
+		}
+		os.RemoveAll(dir)
+	})
+	return dir
+}
+
 func startDaemon(t *testing.T, idle time.Duration, prefix string) *Daemon {
 	t.Helper()
+	name := "d.sock"
+	if overTCP {
+		name = "d.json"
+	}
 	d := New(Options{
-		SocketPath:  filepath.Join(privateDir(t, prefix), "d.sock"),
-		IdleTimeout: idle,
-		Version:     "9.9.9-test",
-		HelperPath:  helperBinary,
+		SocketPath:         filepath.Join(privateDir(t, prefix), name),
+		IdleTimeout:        idle,
+		Version:            "9.9.9-test",
+		HelperPath:         helperBinary,
+		TCP:                overTCP,
+		InterruptByMessage: overTCP,
 	})
 	if err := d.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { d.Stop("test cleanup") })
+	testDaemonsMu.Lock()
+	testDaemons[t] = append(testDaemons[t], d)
+	testDaemonsMu.Unlock()
 	return d
 }
 
@@ -62,16 +112,17 @@ type testClient struct {
 	reader *framing.Reader
 	nextID int
 	notes  []message // notifications read while waiting for a reply
+	token  string    // for a TCP daemon
 }
 
 func connect(t *testing.T, path string) *testClient {
 	t.Helper()
-	nc, err := net.Dial("unix", path)
+	nc, token, err := endpoint.Dial(path, 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { nc.Close() })
-	return &testClient{t: t, nc: nc, reader: framing.NewReader(nc)}
+	return &testClient{t: t, nc: nc, reader: framing.NewReader(nc), token: token}
 }
 
 func (c *testClient) sendRaw(s string) {
@@ -130,7 +181,8 @@ func (c *testClient) note() message {
 }
 
 func (c *testClient) initialize(version string) message {
-	return c.request("initialize", map[string]any{"protocolVersion": version, "clientInfo": map[string]string{"name": "test"}})
+	return c.request("initialize", map[string]any{"protocolVersion": version, "clientInfo": map[string]string{"name": "test"},
+		"token": c.token})
 }
 
 func wantCode(t *testing.T, m message, code int) {
@@ -295,6 +347,7 @@ func TestMultibyteRoundTrip(t *testing.T) {
 }
 
 func TestPermissions(t *testing.T) {
+	skipOverTCP(t)
 	path := filepath.Join(privateDir(t, "cpd-"), "nested", "d.sock")
 	d := New(Options{SocketPath: path})
 	if err := d.Start(); err != nil {
@@ -309,6 +362,7 @@ func TestPermissions(t *testing.T) {
 }
 
 func TestUnsafeDirIsRefusedNotChmodded(t *testing.T) {
+	skipOverTCP(t)
 	dir := privateDir(t, "cpd-")
 	os.Chmod(dir, 0o755)
 	err := New(Options{SocketPath: filepath.Join(dir, "d.sock")}).Start()
@@ -323,7 +377,7 @@ func TestUnsafeDirIsRefusedNotChmodded(t *testing.T) {
 
 func TestSecondDaemonIsRefused(t *testing.T) {
 	d := startDaemon(t, 0, "cpd-")
-	err := New(Options{SocketPath: d.opts.SocketPath}).Start()
+	err := New(Options{SocketPath: d.opts.SocketPath, TCP: overTCP}).Start()
 	var already *AlreadyRunningError
 	if !errors.As(err, &already) {
 		t.Fatalf("got %v, want AlreadyRunningError", err)
@@ -332,6 +386,7 @@ func TestSecondDaemonIsRefused(t *testing.T) {
 }
 
 func TestStaleSocketIsReplaced(t *testing.T) {
+	skipOverTCP(t)
 	path := filepath.Join(privateDir(t, "cpd-"), "d.sock")
 	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
@@ -362,6 +417,7 @@ func TestRegularFileIsLeftAlone(t *testing.T) {
 }
 
 func TestStopLeavesAnotherDaemonsSocket(t *testing.T) {
+	skipOverTCP(t)
 	first := startDaemon(t, 0, "cpd-")
 	path := first.opts.SocketPath
 	os.Remove(path) // someone deletes the socket; a second daemon takes the path
@@ -402,7 +458,7 @@ func TestShutdown(t *testing.T) {
 	d := startDaemon(t, 0, "cpd-")
 	c := connect(t, d.opts.SocketPath)
 	wantOK(t, c.initialize(protocol.Version))
-	m := c.request("shutdown", nil)
+	m := c.request("shutdown", map[string]string{"token": c.token})
 	wantOK(t, m)
 	if string(m.Result) != `{"ok":true}` {
 		t.Fatalf("result %s", m.Result)
@@ -438,7 +494,33 @@ func TestTheHelperIsThisDaemonsOwnBinary(t *testing.T) {
 func TestShutdownWorksBeforeInitialize(t *testing.T) {
 	d := startDaemon(t, 0, "cpd-")
 	c := connect(t, d.opts.SocketPath)
-	m := c.request("shutdown", nil)
+	m := c.request("shutdown", map[string]string{"token": c.token})
 	wantOK(t, m)
 	waitFor(t, "the daemon to stop", func() bool { return !exists(d.opts.SocketPath) })
+}
+
+func TestATCPDaemonWantsItsToken(t *testing.T) {
+	d := New(Options{SocketPath: filepath.Join(privateDir(t, "cpd-"), "d.json"), TCP: true, Version: "9.9.9-test"})
+	if err := d.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer d.Stop("test")
+	info, err := endpoint.Read(d.opts.SocketPath)
+	if err != nil || info.PID != os.Getpid() {
+		t.Fatalf("endpoint %+v %v", info, err)
+	}
+	c := connect(t, d.opts.SocketPath)
+	good := c.token
+	c.token = "wrong"
+	wantCode(t, c.initialize(protocol.Version), protocol.Unauthorized)
+	wantCode(t, c.request("daemon/status", nil), protocol.NotInitialized)
+	wantCode(t, c.request("shutdown", nil), protocol.Unauthorized)
+	c.token = good
+	wantOK(t, c.initialize(protocol.Version))
+	// Once initialized, the connection has shown its token.
+	wantOK(t, c.request("shutdown", nil))
+	d.Stop("test")
+	if _, err := os.Stat(d.opts.SocketPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("endpoint file left behind: %v", err)
+	}
 }

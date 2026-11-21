@@ -182,7 +182,7 @@ func TestPermissionAnswerErrors(t *testing.T) {
 
 func TestNobodyToAskMeansDenied(t *testing.T) {
 	d := startDaemon(t, 0, "cpd-")
-	events := filepath.Join(t.TempDir(), "events")
+	events := filepath.Join(projectDir(t), "events")
 	t.Setenv("FAKE_CLAUDE_EVENTS_LOG", events)
 	c := ready(t, d)
 	id := createSession(t, c, fakeClaude)

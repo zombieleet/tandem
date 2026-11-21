@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package paths says where the daemon's socket lives.
 // Keep it in step with claude-pair-rpc-default-socket-path in lisp/claude-pair-rpc.el.
 package paths
@@ -7,9 +9,6 @@ import (
 	"os"
 	"path/filepath"
 )
-
-// MaxSocketPathBytes is the macOS limit: 104 bytes including the terminating NUL.
-const MaxSocketPathBytes = 103
 
 // DefaultRuntimeDir is $XDG_RUNTIME_DIR/claude-pair, or <tmpdir>/claude-pair-<uid>
 // when XDG_RUNTIME_DIR is unset or not absolute.
@@ -24,3 +23,6 @@ func DefaultRuntimeDir() string {
 func DefaultSocketPath() string {
 	return filepath.Join(DefaultRuntimeDir(), "daemon.sock")
 }
+
+// DefaultTCP says whether the daemon listens on TCP unless told otherwise.
+const DefaultTCP = false

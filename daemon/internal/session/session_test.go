@@ -3,9 +3,10 @@ package session
 import (
 	"errors"
 	"fmt"
+	"github.com/victory/claude-pair/daemon/internal/testutil"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -19,9 +20,8 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	fakeClaude = filepath.Join(dir, "fakeclaude")
-	if out, err := exec.Command("go", "build", "-o", fakeClaude, "../testutil/fakeclaude").CombinedOutput(); err != nil {
-		panic(fmt.Sprintf("building fakeclaude: %v\n%s", err, out))
+	if fakeClaude, err = testutil.Binary(dir, "fakeclaude", "../testutil/fakeclaude"); err != nil {
+		panic(err)
 	}
 	code := m.Run()
 	os.RemoveAll(dir)
@@ -280,6 +280,9 @@ func TestPromptWhileBusyFails(t *testing.T) {
 }
 
 func TestCancelThenResume(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("SIGINT; Windows cancels by message (TestCancelByMessageKeepsTheProcess)")
+	}
 	r := newRecorder()
 	s, _ := newSession(t, r)
 	s.Prompt("script:slow")
@@ -427,6 +430,9 @@ func TestCheckClaude(t *testing.T) {
 }
 
 func TestCheckClaudeTooOld(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell script as claude")
+	}
 	old := filepath.Join(t.TempDir(), "claude")
 	data, _ := os.ReadFile(fakeClaude)
 	os.WriteFile(old, data, 0o755)
@@ -467,6 +473,19 @@ func TestToolTitles(t *testing.T) {
 		{"Bash", map[string]any{"command": strings.Repeat("x", 100)}, "Bash " + strings.Repeat("x", 79) + "…"},
 	}
 	for _, c := range cases {
+		if runtime.GOOS == "windows" {
+			// The same paths as Windows has them.
+			cwd = `C:\work\proj`
+			converted := false
+			for k, v := range c.input {
+				if s, ok := v.(string); ok && strings.HasPrefix(s, "/work/proj") {
+					c.input[k], converted = "C:"+filepath.FromSlash(s), true
+				}
+			}
+			if converted {
+				c.want = strings.ReplaceAll(c.want, "/", `\`)
+			}
+		}
 		if got := ToolTitle(c.name, c.input, cwd); got != c.want {
 			t.Errorf("ToolTitle(%s, %v) = %q, want %q", c.name, c.input, got, c.want)
 		}
@@ -498,5 +517,40 @@ func TestInstructionsGoIntoTheSystemPrompt(t *testing.T) {
 	s = New(Options{ID: "abc", Cwd: "/p", ClaudePath: "/c"})
 	if got := strings.Join(s.Args(false), " "); strings.Contains(got, "--append-system-prompt") {
 		t.Fatalf("args %q", got)
+	}
+}
+
+func TestCancelByMessageKeepsTheProcess(t *testing.T) {
+	r := newRecorder()
+	s := New(Options{ID: "sess-123", Cwd: t.TempDir(), ClaudePath: fakeClaude, Emit: r.emit, OnIdle: r.idle,
+		InterruptByMessage: true})
+	t.Cleanup(s.Close)
+	s.Prompt("script:slow")
+	r.waitFor(t, "some text", func(u Update) bool { return u["kind"] == "text" })
+	if !s.Cancel() {
+		t.Fatal("Cancel returned false during a turn")
+	}
+	r.waitIdle(t, 0)
+	result := r.waitFor(t, "result", func(u Update) bool { return u["kind"] == "result" })
+	if result["cancelled"] != true || result["isError"] != false {
+		t.Fatalf("result %v, want cancelled and not an error", result)
+	}
+	// The same claude takes the next prompt: no restart, no --resume.
+	before := len(r.snapshot())
+	if err := s.Prompt("script:args"); err != nil {
+		t.Fatal(err)
+	}
+	r.waitIdle(t, 1)
+	var args string
+	for _, u := range r.snapshot()[before:] {
+		if u["kind"] == "text" {
+			args += u["delta"].(string)
+		}
+		if u["kind"] == "status" && u["state"] == "starting" {
+			t.Fatalf("claude restarted after a cancel by message: %v", r.snapshot()[before:])
+		}
+	}
+	if !strings.Contains(args, "--session-id sess-123") {
+		t.Fatalf("args %q, want the first process's", args)
 	}
 }

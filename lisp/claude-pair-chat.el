@@ -1036,10 +1036,15 @@ block until it is resolved.  EXTRA is a plist kept with the block."
                          "    ✗ Denied")
                        'face 'claude-pair-chat-tool-error)))))))
 
+(defvar claude-pair-chat--hunk-totals (make-hash-table :test #'equal)
+  "From edit id to its number of hunks, kept from when Emacs showed it.
+The block may be drawn after you decided the edit, when it is gone.")
+
 (defun claude-pair-chat--edit-lines (update)
   "Return (HEAD . HINT), the two lines of the edit block for UPDATE."
   (let* ((id (plist-get update :requestId))
-         (total (cdr (claude-pair-review-hunk-count id)))
+         (total (or (cdr (claude-pair-review-hunk-count id))
+                    (gethash id claude-pair-chat--hunk-totals)))
          (all (if (and total (> total 1)) " all" "")))
     (cons
      (propertize (format "  ✎ Claude wants to %s %s%s\n"
@@ -1066,6 +1071,7 @@ block until it is resolved.  EXTRA is a plist kept with the block."
 The block can be drawn before Emacs has shown the edit, and then it
 has neither its keys nor its number of hunks."
   (let ((id (plist-get proposal :id)))
+    (puthash id (length (plist-get proposal :hunks)) claude-pair-chat--hunk-totals)
     (maphash
      (lambda (_session buffer)
        (when (buffer-live-p buffer)

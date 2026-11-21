@@ -4,10 +4,10 @@ LISP := $(wildcard lisp/*.el)
 TESTS := $(wildcard test/*-tests.el)
 
 VERSION ?= $(shell sed -n 's/^var Version = "\(.*\)"/\1/p' daemon/internal/version/version.go)
-DIST_TARGETS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+DIST_TARGETS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 LDFLAGS := -s -w -X github.com/victory/claude-pair/daemon/internal/version.Version=$(VERSION)
 
-.PHONY: all deps daemon fakeclaude compile test test-lisp test-daemon vet versions checkdoc check dist print-version clean help
+.PHONY: all deps daemon fakeclaude compile test test-lisp test-lisp-tcp test-daemon test-wine vet versions checkdoc check dist print-version clean help
 
 all: daemon compile
 
@@ -19,13 +19,13 @@ deps:
 daemon:
 	cd daemon && $(GO) build -trimpath -o bin/claude-paird ./cmd/claude-paird
 
-## dist: static daemons for Linux and macOS (amd64, arm64) and SHA256SUMS in dist/
+## dist: static daemons for Linux, macOS and Windows (amd64, arm64) and SHA256SUMS in dist/
 dist:
 	rm -rf dist && mkdir -p dist
 	cd daemon && for target in $(DIST_TARGETS); do \
-	  os=$${target%/*}; arch=$${target#*/}; \
+	  os=$${target%/*}; arch=$${target#*/}; ext=; [ $$os = windows ] && ext=.exe; \
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags '$(LDFLAGS)' \
-	    -o ../dist/claude-paird-$(VERSION)-$$os-$$arch ./cmd/claude-paird || exit 1; \
+	    -o ../dist/claude-paird-$(VERSION)-$$os-$$arch$$ext ./cmd/claude-paird || exit 1; \
 	done
 	cd dist && if command -v sha256sum >/dev/null; then sha256sum claude-paird-* > SHA256SUMS; \
 	  else shasum -a 256 claude-paird-* > SHA256SUMS; fi
@@ -47,13 +47,37 @@ test-lisp: daemon fakeclaude
 	  $(addprefix -l ,$(TESTS)) -f ert-run-tests-batch-and-exit </dev/null
 	@# No stdin: a test that asks a question fails at once instead of hanging.
 
-## test-daemon: run the daemon's Go tests with the race detector
+## test-lisp-tcp: the ERT suite with the daemon on a local TCP port, as on Windows
+test-lisp-tcp: daemon fakeclaude
+	CLAUDE_PAIR_TEST_TRANSPORT=tcp $(EMACS) -Q --batch -L lisp -L test \
+	  --eval '(setq load-prefer-newer t)' \
+	  $(addprefix -l ,$(TESTS)) -f ert-run-tests-batch-and-exit </dev/null
+
+## test-daemon: run the daemon's Go tests with the race detector, the server's over TCP too
 test-daemon:
 	cd daemon && $(GO) test -race -count=1 ./...
+	cd daemon && CPD_TEST_TCP=1 $(GO) test -race -count=1 ./internal/server
 
-## vet: go vet, plus a gofmt check
+## test-wine: run the daemon's Go tests built for Windows under Wine (not a real Windows)
+WINE ?= wine
+WINE_DIR := $(CURDIR)/daemon/bin/wine
+test-wine:
+	rm -rf $(WINE_DIR)/*.exe $(WINE_DIR)/bin && mkdir -p $(WINE_DIR)/bin
+	cd daemon && GOOS=windows $(GO) build -o $(WINE_DIR)/bin/fakeclaude.exe ./internal/testutil/fakeclaude
+	cd daemon && GOOS=windows $(GO) build -o $(WINE_DIR)/bin/claude-paird.exe ./cmd/claude-paird
+	cd daemon && for pkg in $$($(GO) list -f '{{if .TestGoFiles}}{{.Dir}}{{end}}' ./...); do \
+	  name=$$(basename $$pkg); GOOS=windows $(GO) test -c -o $(WINE_DIR)/$$name.test.exe $$pkg || exit 1; \
+	  echo "== $$name"; \
+	  (cd $$pkg && WINEDEBUG=-all WINEPREFIX=$(WINE_DIR)/prefix CPD_TEST_TCP=1 \
+	    CPD_TEST_BINARIES="Z:$$(echo $(WINE_DIR)/bin | tr / '\\')" \
+	    timeout 600 $(WINE) $(WINE_DIR)/$$name.test.exe -test.count=1 -test.timeout=500s) || failed=1; \
+	done; WINEPREFIX=$(WINE_DIR)/prefix wineserver -k 2>/dev/null; exit $${failed:-0}
+
+## vet: go vet for Linux, macOS and Windows, plus a gofmt check
 vet:
 	cd daemon && $(GO) vet ./...
+	cd daemon && GOOS=darwin $(GO) vet ./...
+	cd daemon && GOOS=windows $(GO) vet ./...
 	@cd daemon && unformatted="$$(gofmt -l .)" && \
 	  if [ -n "$$unformatted" ]; then echo "gofmt needed:"; echo "$$unformatted"; exit 1; fi
 
@@ -71,8 +95,8 @@ print-version:
 checkdoc:
 	$(EMACS) -Q --batch -L lisp -l test/run-checkdoc.el $(LISP)
 
-## test: run both test suites
-test: test-daemon test-lisp
+## test: run both test suites, the Emacs one over a socket and over TCP
+test: test-daemon test-lisp test-lisp-tcp
 
 ## check: vet, compile, checkdoc and test
 check: vet versions compile checkdoc test

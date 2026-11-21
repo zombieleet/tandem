@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/victory/claude-pair/daemon/internal/endpoint"
 	"github.com/victory/claude-pair/daemon/internal/history"
 	"github.com/victory/claude-pair/daemon/internal/paths"
 	"github.com/victory/claude-pair/daemon/internal/protocol"
@@ -49,6 +51,12 @@ type Options struct {
 	// HelperPath is the claude-paird executable that Claude Code starts as
 	// "claude-paird mcp". It defaults to this program.
 	HelperPath string
+	// TCP listens on a local TCP port, written with a token to an endpoint
+	// file at SocketPath, instead of on a Unix socket there.
+	TCP bool
+	// InterruptByMessage cancels turns by message instead of SIGINT; see
+	// session.Options. It is always so on Windows.
+	InterruptByMessage bool
 }
 
 type client struct {
@@ -70,8 +78,9 @@ type sessionEntry struct {
 // Daemon serves clients on a Unix socket.
 type Daemon struct {
 	opts    Options
-	ln      *net.UnixListener
+	ln      net.Listener
 	inode   uint64
+	token   string // what TCP clients must send in initialize; "" for a socket
 	started time.Time
 	wg      sync.WaitGroup
 
@@ -121,6 +130,9 @@ func (d *Daemon) StopReason() string {
 
 // Start prepares the socket directory, replaces a stale socket and listens.
 func (d *Daemon) Start() error {
+	if d.opts.TCP {
+		return d.startTCP()
+	}
 	path := d.opts.SocketPath
 	if n := len(path); n > paths.MaxSocketPathBytes {
 		return fmt.Errorf("socket path is %d bytes, more than the %d allowed: %s", n, paths.MaxSocketPathBytes, path)
@@ -154,6 +166,45 @@ func (d *Daemon) Start() error {
 	d.armIdle()
 	d.opts.Log.Info("listening", "socket", path, "pid", os.Getpid(), "version", d.opts.Version)
 	return nil
+}
+
+// startTCP listens on a local port and writes the endpoint file.
+func (d *Daemon) startTCP() error {
+	path := d.opts.SocketPath
+	if err := PrepareSocketDir(filepath.Dir(path)); err != nil {
+		return err
+	}
+	if CanConnect(path, time.Second) {
+		return &AlreadyRunningError{Path: path}
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	token := endpoint.NewToken()
+	if err := endpoint.Write(path, endpoint.Info{Port: ln.Addr().(*net.TCPAddr).Port, Token: token, PID: os.Getpid()}); err != nil {
+		ln.Close()
+		return err
+	}
+	d.ln, d.token, d.started = ln, token, time.Now()
+	go d.acceptLoop()
+	d.armIdle()
+	d.opts.Log.Info("listening", "endpoint", path, "address", ln.Addr().String(), "pid", os.Getpid(),
+		"version", d.opts.Version)
+	return nil
+}
+
+// tokenOK reports whether params carry this daemon's token, as a TCP client
+// must. A socket needs none: its mode keeps others out.
+func (d *Daemon) tokenOK(params json.RawMessage) bool {
+	if d.token == "" {
+		return true
+	}
+	var p struct {
+		Token string `json:"token"`
+	}
+	_ = json.Unmarshal(params, &p)
+	return subtle.ConstantTimeCompare([]byte(p.Token), []byte(d.token)) == 1
 }
 
 // Stop closes every connection, removes the socket and closes Done. It is
@@ -201,7 +252,12 @@ func (d *Daemon) Stop(reason string) {
 		case <-time.After(2 * time.Second):
 			d.opts.Log.Warn("clients did not close in time")
 		}
-		if err := removeSocketIfOurs(d.opts.SocketPath, d.inode); err != nil {
+		if d.token != "" {
+			// The endpoint file, unless another daemon has written its own.
+			if info, err := endpoint.Read(d.opts.SocketPath); err == nil && info.Token == d.token {
+				_ = os.Remove(d.opts.SocketPath)
+			}
+		} else if err := removeSocketIfOurs(d.opts.SocketPath, d.inode); err != nil {
 			d.opts.Log.Warn("cannot remove socket", "error", err)
 		}
 		d.opts.Log.Info("stopped", "reason", reason)
@@ -229,7 +285,7 @@ func (d *Daemon) Status() protocol.StatusResult {
 
 func (d *Daemon) acceptLoop() {
 	for {
-		nc, err := d.ln.AcceptUnix()
+		nc, err := d.ln.Accept()
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
 				return
@@ -242,7 +298,7 @@ func (d *Daemon) acceptLoop() {
 	}
 }
 
-func (d *Daemon) accept(nc *net.UnixConn) {
+func (d *Daemon) accept(nc net.Conn) {
 	d.mu.Lock()
 	if d.stopping {
 		d.mu.Unlock()
@@ -285,6 +341,10 @@ func (d *Daemon) handle(ctx context.Context, c *client, method string, params js
 	case "shutdown":
 		// Allowed before initialize, so a client of any version can stop a
 		// daemon whose protocol it does not speak.
+		// Before initialize, over TCP, only with the token.
+		if !c.initialized.Load() && !d.tokenOK(params) {
+			return nil, rpc.Errorf(protocol.Unauthorized, "shutdown needs the token from the endpoint file")
+		}
 		return rpc.Then{
 			Result: map[string]bool{"ok": true},
 			After:  func() { go d.Stop("shutdown request") },
@@ -399,6 +459,9 @@ func (d *Daemon) initialize(c *client, params json.RawMessage) (any, error) {
 	if len(params) == 0 || json.Unmarshal(params, &p) != nil || p.ProtocolVersion == nil {
 		return nil, rpc.Errorf(protocol.InvalidParams, "initialize needs a protocolVersion string")
 	}
+	if !d.tokenOK(params) {
+		return nil, rpc.Errorf(protocol.Unauthorized, "initialize needs the token from the endpoint file")
+	}
 	if !protocol.Compatible(*p.ProtocolVersion, protocol.Version) {
 		return nil, &rpc.Error{
 			Code: protocol.IncompatibleProtocol,
@@ -480,10 +543,11 @@ func (d *Daemon) startSession(c *client, id string, p *sessionParams, resume boo
 		Instructions: p.Instructions,
 		HelperCommand: []string{d.opts.HelperPath, "mcp",
 			"--socket", d.opts.SocketPath, "--session", id},
-		Log:    d.opts.Log,
-		Emit:   func(u session.Update) { d.broadcast(id, u) },
-		OnIdle: d.armIdle,
-		Resume: resume,
+		Log:                d.opts.Log,
+		Emit:               func(u session.Update) { d.broadcast(id, u) },
+		OnIdle:             d.armIdle,
+		Resume:             resume,
+		InterruptByMessage: d.opts.InterruptByMessage || session.DefaultInterruptByMessage,
 	})
 	d.mu.Lock()
 	d.sessions[id] = &sessionEntry{s: s, subs: map[*client]bool{c: true}}
@@ -734,19 +798,13 @@ func PrepareSocketDir(dir string) error {
 	if !info.IsDir() {
 		return &UnsafeDirError{dir + " is not a directory"}
 	}
-	if st, ok := info.Sys().(*syscall.Stat_t); ok && int(st.Uid) != os.Getuid() {
-		return &UnsafeDirError{fmt.Sprintf("%s belongs to uid %d, not to you (uid %d)", dir, st.Uid, os.Getuid())}
-	}
-	if perm := info.Mode().Perm(); perm&0o077 != 0 {
-		return &UnsafeDirError{fmt.Sprintf(
-			"%s has mode %o, so other users can reach the socket; run chmod 700 on it or pick another directory", dir, perm)}
-	}
-	return nil
+	return checkPrivate(dir, info)
 }
 
-// CanConnect reports whether something accepts connections on path.
+// CanConnect reports whether something accepts connections on path, a
+// socket or an endpoint file.
 func CanConnect(path string, timeout time.Duration) bool {
-	nc, err := net.DialTimeout("unix", path, timeout)
+	nc, _, err := endpoint.Dial(path, timeout)
 	if err != nil {
 		return false
 	}
@@ -776,10 +834,7 @@ func inodeOf(path string) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if st, ok := info.Sys().(*syscall.Stat_t); ok {
-		return uint64(st.Ino), nil
-	}
-	return 0, nil
+	return inodeNumber(info), nil
 }
 
 func removeSocketIfOurs(path string, inode uint64) error {

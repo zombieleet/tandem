@@ -88,7 +88,7 @@ func relative(path, cwd string) string {
 		return path
 	}
 	rel, err := filepath.Rel(cwd, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return path
 	}
 	return rel
