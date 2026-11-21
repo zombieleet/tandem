@@ -52,6 +52,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'claude-pair-authorship)
 (require 'claude-pair-layout)
 (require 'claude-pair-rpc)
 (require 'seq)
@@ -220,7 +221,9 @@ modified flag stays as it was."
           ;; As `with-silent-modifications' once did: no truename, no
           ;; file locking or supersession check for this change.
           (buffer-file-truename nil)
-          (buffer-undo-list t))
+          (buffer-undo-list t)
+          ;; Not an edit of yours: Claude's lines keep their colour.
+          (claude-pair-authorship-claude-editing t))
       (funcall fn))
     (restore-buffer-modified-p modified)))
 
@@ -769,7 +772,8 @@ With NO-SAVE, leave saving to the caller.  Return non-nil if applied."
             (let ((start (marker-position beg))
                   (stop (marker-position end)))
               (claude-pair-review--settle hunk 'applied)
-              (claude-pair-review--replace start stop (claude-pair-review--hunk-new hunk))
+              (claude-pair-review--replace start stop (claude-pair-review--hunk-new hunk)
+                                           (claude-pair-review--author proposal))
               (when (and claude-pair-review-autosave clean (not no-save))
                 (claude-pair-review--save proposal)
                 (setf (claude-pair-review--hunk-saved hunk) t))
@@ -784,8 +788,22 @@ With NO-SAVE, leave saving to the caller.  Return non-nil if applied."
                          (error-message-string err)))
            nil)))))))
 
-(defun claude-pair-review--replace (beg end text)
-  "Replace BEG..END with TEXT as a single undo step."
+(defun claude-pair-review--author (proposal)
+  "Return the authorship record of PROPOSAL's text, making it once."
+  (or (plist-get proposal :author)
+      (let* ((session (plist-get proposal :session))
+             (info (and (fboundp 'claude-pair-chat-session-info)
+                        (claude-pair-chat-session-info session)))
+             (id (claude-pair-authorship-record
+                  :session session :request (plist-get proposal :id)
+                  :file (plist-get proposal :path)
+                  :model (plist-get info :model) :turn (plist-get info :turn))))
+        (plist-put proposal :author id)
+        id)))
+
+(defun claude-pair-review--replace (beg end text &optional author)
+  "Replace BEG..END with TEXT as a single undo step.
+With AUTHOR, an authorship record id, mark TEXT as Claude's."
   (let ((group (prepare-change-group))
         (done nil))
     (unwind-protect
@@ -793,8 +811,11 @@ With NO-SAVE, leave saving to the caller.  Return non-nil if applied."
           (activate-change-group group)
           (save-excursion
             (goto-char beg)
-            (delete-region beg end)
-            (insert text))
+            (let ((claude-pair-authorship-claude-editing t))
+              (delete-region beg end)
+              (insert text))
+            (when author
+              (claude-pair-authorship-mark beg (+ beg (length text)) author)))
           (setq done t))
       (if done
           (accept-change-group group)

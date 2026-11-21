@@ -1,0 +1,342 @@
+;;; claude-pair-authorship.el --- Claude's lines keep their colour  -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 Victory
+
+;; Author: Victory <osikwemhev@gmail.com>
+;; Keywords: tools, convenience
+;; URL: https://github.com/victory/claude-pair
+
+;; This file is not part of GNU Emacs.
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+;;
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+;;
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+;;; Commentary:
+
+;; Text Claude wrote, through an edit you applied, carries the text
+;; property `claude-pair-author', whose value names a record: the chat
+;; session, its turn, the model and the time.  A line holding such text
+;; is Claude's, and shows a light tint and, in a graphical frame, a mark
+;; in the left fringe, so colour is never the only signal.
+;;
+;; The rule: any change that is not Claude's takes the colour off every
+;; line it touches.  Typing next to Claude's text or pasting it makes it
+;; yours.  Opening a new line after one of Claude's, or deleting whole
+;; lines around it, does not touch it.  Undo and redo bring the colour
+;; back or take it away with the text, since Emacs records text property
+;; changes in the undo list.  With `claude-pair-attribution-ignore-whitespace'
+;; a line whose only change is whitespace, as from a formatter, keeps its
+;; colour.
+
+;;; Code:
+
+(require 'cl-lib)
+(require 'color)
+(require 'seq)
+(require 'subr-x)
+
+(defcustom claude-pair-attribution-ignore-whitespace t
+  "Non-nil means a Claude line keeps its colour when only whitespace changes.
+Formatters and reindenting change whitespace on many lines at once."
+  :type 'boolean
+  :group 'claude-pair)
+
+(defcustom claude-pair-author-color "#d97757"
+  "Colour blended into the background of Claude's lines, or nil.
+With nil, the face `claude-pair-author' is left as your theme sets it."
+  :type '(choice color (const :tag "Leave the face alone" nil))
+  :group 'claude-pair)
+
+(defcustom claude-pair-author-tint 0.10
+  "How much of `claude-pair-author-color' to blend in: 0 none, 1 all."
+  :type 'number
+  :group 'claude-pair)
+
+(defface claude-pair-author
+  '((t :extend t))
+  "Face of the lines Claude wrote.
+Its background is computed from `claude-pair-author-color' and the
+theme's background."
+  :group 'claude-pair)
+
+(defface claude-pair-author-fringe
+  '((t :inherit shadow))
+  "Face of the fringe mark on the lines Claude wrote.
+Its foreground is set to `claude-pair-author-color'."
+  :group 'claude-pair)
+
+(defvar claude-pair-authorship-claude-editing nil
+  "Non-nil while Claude's own text goes in, so it is not taken for yours.
+Also bound for text drawn for display only, such as proposals.")
+
+(defvar claude-pair-authorship--records (make-hash-table :test #'equal)
+  "Map from record id to a plist: :session, :turn, :model, :time, :file, :request.")
+
+(defvar-local claude-pair-authorship--overlays nil
+  "Overlays drawing Claude's lines in this buffer.")
+
+(defvar-local claude-pair-authorship--dirty nil
+  "Non-nil when this buffer's overlays need drawing again.")
+
+(defvar-local claude-pair-authorship--before nil
+  "What `claude-pair-authorship--before-change' saw: (ALIGNED . LINES).
+ALIGNED is non-nil if the changing text was whole lines; LINES maps the
+whitespace-free text of each of Claude's lines there to its record.")
+
+(defvar-local claude-pair-authorship--removed nil
+  "Claude's lines that changes in the current command removed: (TEXT . ID).
+A formatter that deletes the text and inserts its new version in two
+steps gets their colour back for the lines whose only change is
+whitespace.  Forgotten after each command.")
+
+(defvar claude-pair-authorship--timer nil
+  "Idle timer that draws the buffers whose overlays are out of date.")
+
+(when (fboundp 'define-fringe-bitmap)
+  (define-fringe-bitmap 'claude-pair-author-bar [#b11100000] 1 8 '(center t)))
+
+;;;; Records
+
+(defun claude-pair-authorship-record (&rest plist)
+  "Store a record of who wrote some text, from PLIST, and return its id.
+PLIST holds :session, :turn, :model, :file and :request; :time is added."
+  (let ((id (format "%s/%d" (or (plist-get plist :request) "claude")
+                    (hash-table-count claude-pair-authorship--records))))
+    (puthash id (append plist (list :time (float-time))) claude-pair-authorship--records)
+    id))
+
+(defun claude-pair-authorship-record-of (id)
+  "Return the record named ID."
+  (gethash id claude-pair-authorship--records))
+
+(defun claude-pair-authorship-at (pos)
+  "Return the record id of the text Claude wrote on the line of POS, or nil."
+  (save-excursion
+    (goto-char pos)
+    (let ((bol (line-beginning-position))
+          (eol (line-end-position)))
+      (or (get-text-property bol 'claude-pair-author)
+          (let ((next (next-single-property-change bol 'claude-pair-author nil eol)))
+            (and (< next eol) (get-text-property next 'claude-pair-author)))))))
+
+;;;; Marking Claude's text
+
+(defun claude-pair-authorship-mark (beg end id)
+  "Mark BEG..END as written by Claude, for the record ID."
+  (when (< beg end)
+    (let ((inhibit-read-only t)
+          (inhibit-modification-hooks t))
+      (put-text-property beg end 'claude-pair-author id))
+    (claude-pair-authorship--watch)
+    (claude-pair-authorship--schedule)))
+
+(defun claude-pair-authorship--watch ()
+  "Watch this buffer, so that your edits take the colour off Claude's lines."
+  (add-hook 'before-change-functions #'claude-pair-authorship--before-change nil t)
+  (add-hook 'after-change-functions #'claude-pair-authorship--after-change nil t)
+  (add-hook 'post-command-hook #'claude-pair-authorship--forget nil t)
+  ;; Text you type next to Claude's does not take its property.
+  (setq-local text-property-default-nonsticky
+              (cons '(claude-pair-author . t)
+                    (assq-delete-all 'claude-pair-author
+                                     (copy-sequence text-property-default-nonsticky))))
+  ;; Text you paste is yours.
+  (unless (memq 'claude-pair-author yank-excluded-properties)
+    (setq yank-excluded-properties (append yank-excluded-properties '(claude-pair-author)))))
+
+(defun claude-pair-authorship--forget ()
+  "Forget which of Claude's lines the last command removed."
+  (setq claude-pair-authorship--removed nil))
+
+(defun claude-pair-authorship--ours-p ()
+  "Return non-nil if the change happening now is not one to take as yours."
+  (or claude-pair-authorship-claude-editing undo-in-progress))
+
+(defun claude-pair-authorship--squeeze (string)
+  "Return STRING without any whitespace."
+  (replace-regexp-in-string "[ \t\n\r\f]+" "" string))
+
+(defun claude-pair-authorship--each-line (beg end fn)
+  "Call FN with the start and end of each line from BEG's line to END's."
+  (save-excursion
+    (let ((stop (progn (goto-char end) (line-end-position)))
+          (done nil))
+      (goto-char beg)
+      (forward-line 0)
+      (while (and (not done) (<= (point) stop))
+        (funcall fn (point) (line-end-position))
+        (when (or (> (forward-line 1) 0) (eobp))
+          (setq done t))))))
+
+(defun claude-pair-authorship--lines (beg end)
+  "Return (TEXT . ID) for each of Claude's lines from BEG's line to END's.
+TEXT is the line without whitespace."
+  (let (lines)
+    (claude-pair-authorship--each-line
+     beg end
+     (lambda (bol eol)
+       (when-let* ((id (claude-pair-authorship-at bol))
+                   (text (claude-pair-authorship--squeeze (buffer-substring-no-properties bol eol))))
+         (unless (string-empty-p text)
+           (push (cons text id) lines)))))
+    lines))
+
+(defun claude-pair-authorship--before-change (beg end)
+  "Note what the change of BEG..END is about to replace."
+  (setq claude-pair-authorship--before
+        (unless (claude-pair-authorship--ours-p)
+          (cons (and (save-excursion (goto-char beg) (bolp))
+                     (save-excursion (goto-char end) (bolp))
+                     (< beg end))
+                (and claude-pair-attribution-ignore-whitespace
+                     (text-property-not-all
+                      (save-excursion (goto-char beg) (line-beginning-position))
+                      (save-excursion (goto-char end) (line-end-position))
+                      'claude-pair-author nil)
+                     (claude-pair-authorship--lines beg end))))))
+
+(defun claude-pair-authorship--touched (beg end len aligned)
+  "Return (FROM . TO), the whole lines a change of BEG..END touched, or nil.
+LEN is the length of the text it replaced; ALIGNED is non-nil if that
+text was whole lines."
+  (cond
+   ;; Whole lines went and whole lines (or nothing) came: the lines around
+   ;; them are unchanged.
+   ((and aligned
+         (save-excursion (goto-char beg) (bolp))
+         (save-excursion (goto-char end) (bolp)))
+    (when (< beg end) (cons beg end)))
+   ;; Text inserted at the end of a line, starting with a newline, opens new
+   ;; lines below that line without changing it.
+   ((and (zerop len) (< beg end) (eq (char-after beg) ?\n)
+         (or (= end (point-max)) (eq (char-after end) ?\n)))
+    (cons (1+ beg) (save-excursion (goto-char end) (line-end-position))))
+   (t
+    (cons (save-excursion (goto-char beg) (line-beginning-position))
+          (save-excursion (goto-char end) (line-end-position))))))
+
+(defun claude-pair-authorship--after-change (beg end len)
+  "Take the colour off the lines a change of BEG..END, which was LEN long, touched."
+  (unless (claude-pair-authorship--ours-p)
+    (let* ((before claude-pair-authorship--before)
+           (range (claude-pair-authorship--touched beg end len (car before)))
+           (known (append (cdr before) claude-pair-authorship--removed)))
+      (setq claude-pair-authorship--before nil)
+      (when (and claude-pair-attribution-ignore-whitespace (cdr before))
+        (setq claude-pair-authorship--removed known))
+      (when (and range
+                 (< (car range) (cdr range))
+                 (or (text-property-not-all (car range) (cdr range) 'claude-pair-author nil)
+                     known))
+        (let ((inhibit-read-only t)
+              (inhibit-modification-hooks t))
+          (remove-list-of-text-properties (car range) (cdr range) '(claude-pair-author))
+          ;; A line whose only change is whitespace stays Claude's.
+          (when (and claude-pair-attribution-ignore-whitespace known)
+            (claude-pair-authorship--each-line
+             (car range) (cdr range)
+             (lambda (bol eol)
+               (when-let* (((< bol eol))
+                           (id (cdr (assoc (claude-pair-authorship--squeeze
+                                            (buffer-substring-no-properties bol eol))
+                                           known))))
+                 (put-text-property bol eol 'claude-pair-author id))))))
+        (claude-pair-authorship--schedule)))))
+
+;;;; Drawing
+
+(defun claude-pair-authorship--schedule ()
+  "Draw this buffer's colours again soon."
+  (setq claude-pair-authorship--dirty t)
+  (unless (timerp claude-pair-authorship--timer)
+    (setq claude-pair-authorship--timer
+          (run-with-idle-timer 0.05 nil #'claude-pair-authorship--draw-dirty))))
+
+(defun claude-pair-authorship--draw-dirty ()
+  "Draw every buffer whose colours are out of date."
+  (setq claude-pair-authorship--timer nil)
+  (dolist (buffer (buffer-list))
+    (when (buffer-local-value 'claude-pair-authorship--dirty buffer)
+      (with-current-buffer buffer
+        (claude-pair-authorship-draw)))))
+
+(defun claude-pair-authorship--prefix ()
+  "Return the `line-prefix' that puts a mark in the fringe of Claude's lines."
+  (propertize " " 'display '(left-fringe claude-pair-author-bar claude-pair-author-fringe)))
+
+(defun claude-pair-authorship-draw ()
+  "Draw Claude's lines in this buffer: one overlay per run of them."
+  (setq claude-pair-authorship--dirty nil)
+  (mapc #'delete-overlay claude-pair-authorship--overlays)
+  (setq claude-pair-authorship--overlays nil)
+  (save-excursion
+    (save-restriction
+      (widen)
+      (let ((pos (point-min)) runs)
+        ;; Each stretch of Claude's text covers whole lines; join stretches
+        ;; on the same or neighbouring lines into runs.
+        (while (setq pos (text-property-not-all pos (point-max) 'claude-pair-author nil))
+          (let* ((stop (next-single-property-change pos 'claude-pair-author nil (point-max)))
+                 (first (progn (goto-char pos) (line-beginning-position)))
+                 (last (progn (goto-char (max pos (1- stop)))
+                              (min (point-max) (1+ (line-end-position))))))
+            (if (and runs (<= first (cdar runs)))
+                (setcdr (car runs) (max last (cdar runs)))
+              (push (cons first last) runs))
+            (setq pos stop)))
+        (dolist (run runs)
+          (let ((ov (make-overlay (car run) (cdr run) nil nil nil)))
+            (overlay-put ov 'face 'claude-pair-author)
+            (overlay-put ov 'claude-pair-author-run t)
+            (when (display-graphic-p)
+              (overlay-put ov 'line-prefix (claude-pair-authorship--prefix))
+              (overlay-put ov 'wrap-prefix (claude-pair-authorship--prefix)))
+            (push ov claude-pair-authorship--overlays)))))))
+
+;;;; The tint
+
+(defun claude-pair-authorship--blend (color background alpha &optional frame)
+  "Return COLOR blended over BACKGROUND with weight ALPHA, as #rrggbb, or nil.
+Colour names are read on FRAME: on a terminal frame, such as a daemon's
+first one, they would be rounded to the terminal's few colours."
+  (let ((c (and color (color-name-to-rgb color frame)))
+        (b (and background (color-name-to-rgb background frame))))
+    (when (and c b)
+      (apply #'format "#%02x%02x%02x"
+             (cl-mapcar (lambda (x y) (round (* 255 (+ (* alpha x) (* (- 1 alpha) y))))) c b)))))
+
+(defun claude-pair-authorship-refresh-face (&rest _)
+  "Compute the background of `claude-pair-author' from the theme.
+Use a graphical frame's background when there is one: an Emacs started
+as a daemon has only a frame with no colours until you open one.
+Leave the face as it is when no background is known yet."
+  (when claude-pair-author-color
+    (let* ((frame (or (seq-find #'display-graphic-p (frame-list)) (selected-frame)))
+           (tint (claude-pair-authorship--blend
+                  claude-pair-author-color (face-background 'default frame t)
+                  claude-pair-author-tint frame)))
+      (when tint
+        (set-face-background 'claude-pair-author tint))
+      ;; The fringe mark in the colour itself, so it reads as Claude's.
+      (when (color-defined-p claude-pair-author-color frame)
+        (set-face-foreground 'claude-pair-author-fringe claude-pair-author-color)))))
+
+(claude-pair-authorship-refresh-face)
+;; A daemon's first real frame, and every theme change, bring the colours.
+(add-hook 'after-make-frame-functions #'claude-pair-authorship-refresh-face)
+(when (boundp 'enable-theme-functions)
+  (add-hook 'enable-theme-functions #'claude-pair-authorship-refresh-face)
+  (add-hook 'disable-theme-functions #'claude-pair-authorship-refresh-face))
+
+(provide 'claude-pair-authorship)
+;;; claude-pair-authorship.el ends here

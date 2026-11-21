@@ -153,6 +153,22 @@ If the file is reloaded from disk while a proposal is shown (`revert-buffer`,
 auto-revert), the proposal is dropped and Claude is told to read the file
 again.
 
+## Claude's lines keep their colour
+
+Text Claude wrote, through an edit you applied, keeps a light tint
+(`claude-pair-author-color`, Claude's orange, blended at
+`claude-pair-author-tint`, 10%, into your theme's background, recomputed
+when you change themes) and, in a graphical Emacs, a mark in the left
+fringe, so colour is never the only signal.
+
+Any change of yours takes the colour off every line it touches: typing on
+the line, or pasting Claude's text elsewhere (pasted text is yours).
+Opening a new line after one of Claude's lines, or deleting whole lines
+around it, does not touch it. Undo and redo bring the colour back or take
+it away with the text. With `claude-pair-attribution-ignore-whitespace`
+(on), a line whose only change is whitespace keeps its colour, so
+reindenting and formatters do not wipe it.
+
 ## Claude's windows
 
 `M-x claude-pair` opens the chat in a tab of its own, named "Claude"

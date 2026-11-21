@@ -127,19 +127,50 @@ check, and a milestone is committed before the next one starts.
   revised hunk
 - [X] Dismiss the note with [×]
 
-* TODO M4 · Claude's lines keep their colour [0/6]
-- [ ] Applied Claude text gets the =claude-pair-author= property: session,
-  turn, model, time
-- [ ] A tint and a fringe mark on Claude's lines (never colour alone)
-- [ ] Any change that is not Claude's removes the colour from every line
-  it touches; typing next to Claude's text, or pasting it, makes it yours
-- [ ] Undo and redo bring the colour back or take it away
-- [ ] Formatters: with =claude-pair-attribution-ignore-whitespace=, a line
-  whose only change is whitespace keeps its colour
-- [ ] The tint follows the theme (recomputed on theme change)
-** Visual gate
-- [ ] Claude's lines are tinted; edit one character: that line loses it
-- [ ] Undo brings it back; reindent the buffer: colours stay
+* DONE M4 · Claude's lines keep their colour [6/6]
+- [X] Applied Claude text gets the =claude-pair-author= property, naming a
+  record: session, turn, model, time, file and edit
+- [X] A tint and a fringe mark on Claude's lines (never colour alone):
+  Claude's orange at 10% over your background, the mark in the orange
+- [X] Any change that is not Claude's removes the colour from every line
+  it touches; typing next to Claude's text, or pasting it, makes it yours.
+  Opening a new line after a Claude line, or deleting whole lines around
+  it, does not touch it. Claude's own display-only text (proposals,
+  saving) never counts
+- [X] Undo and redo bring the colour back or take it away (Emacs records
+  the property changes in the undo list)
+- [X] Formatters: with =claude-pair-attribution-ignore-whitespace= (on), a
+  line whose only change is whitespace keeps its colour, also when a
+  formatter deletes the text and inserts its output in two steps
+- [X] The tint follows the theme (=enable-theme-functions=)
+** Auto
+- [X] ERT: marking, your edits, new lines, splitting, deleting lines,
+  pasting, undo, undoing Claude's edit and redo, reindenting and a
+  two-step formatter, the option off, proposals nearby, drawing, the tint
+  (13 tests); =make check= clean (156 ERT tests)
+** Interactive checks run by Claude (fake claude)
+- [X] Terminal, real keys: =C-c C-a= made lines 2–3 Claude's; =RET= at the
+  end of line 3 and typing kept them; typing on line 2 made it yours;
+  =C-/= brought it back; redo took it away again
+- [X] GUI (headless cage): the docstring and =math.pi= lines Claude wrote
+  show the tint and the fringe bar, in a light and a dark theme
+** Found before your check
+- [X] In your Emacs (a daemon, windows from =emacsclient -c=) the tint was
+  "unspecified": it was computed once, when the daemon started with no
+  window and no theme. Now it is computed from a graphical frame,
+  whenever a frame is made and on every theme change, and never set to
+  nothing
+- [X] Then it came out pale red: colour names were read on the daemon's
+  terminal frame, which rounds them to 8 colours. Now they are read on the
+  graphical frame. Checked in a daemon under a headless compositor:
+  =#fbf1ee= over white, =#160c09= on modus-vivendi
+** Visual gate (passed 21 Nov 2026, in your Doom Emacs)
+- [X] Apply an edit: Claude's lines are tinted, with a mark in the fringe
+- [X] Edit one character on one of them: that line loses the colour
+- [X] =C-/= brings it back
+- [X] Reindent the buffer, or let your formatter run on save: the
+  colours stay
+- [X] Switch theme (=M-x load-theme=): the tint follows
 
 * TODO M5 · Colours survive closing the file [0/3]
 - [ ] Saved under =~/.cache/claude-pair/= per project: line ranges and a

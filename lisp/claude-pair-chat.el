@@ -148,6 +148,8 @@ which inherited them from the Emacs that started it."
 (defvar-local claude-pair-chat--state "idle" "What Claude is doing, as a short string.")
 (defvar-local claude-pair-chat--tool nil "Name of the tool Claude is running.")
 (defvar-local claude-pair-chat--model nil "Model name reported by Claude Code.")
+
+(defvar-local claude-pair-chat--turns 0 "Number of messages sent in this chat.")
 (defvar-local claude-pair-chat--cost 0 "Cost of the session so far, in US dollars.")
 (defvar-local claude-pair-chat--tools nil "Map from tool call id to the marker of its status mark.")
 (defvar-local claude-pair-chat--replying nil "Non-nil once Claude's answer to the last message has begun.")
@@ -343,6 +345,13 @@ always start a new session."
   (goto-char (point-max))
   (insert text))
 
+(defun claude-pair-chat-session-info (session)
+  "Return (:model MODEL :turn N) for SESSION's chat, or nil."
+  (when-let* ((buffer (gethash session claude-pair-chat--buffers)))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (list :model claude-pair-chat--model :turn claude-pair-chat--turns)))))
+
 (defun claude-pair-chat-send ()
   "Send the composer's text to Claude."
   (interactive)
@@ -368,6 +377,7 @@ always start a new session."
            (claude-pair-chat--flush)
            nil))
         (progn
+          (setq claude-pair-chat--turns (1+ claude-pair-chat--turns))
           (ring-insert claude-pair-chat--history text)
           (setq claude-pair-chat--history-index nil)
           (claude-pair-chat--set-input "")
