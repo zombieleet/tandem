@@ -48,7 +48,7 @@
 (defconst claude-pair-version "0.2.0"
   "Version of the claude-pair Emacs package.")
 
-(defvar claude-pair-rpc-protocol-version "0.12.0"
+(defvar claude-pair-rpc-protocol-version "0.13.0"
   "Protocol version this client speaks.  See protocol/PROTOCOL.md.")
 
 (defcustom claude-pair-daemon-command nil
@@ -279,6 +279,17 @@ claude-pair needs %s; restart it, ending its sessions? "
 Wait at most TIMEOUT seconds, 10 by default."
   (jsonrpc-request (claude-pair-rpc-connection) method params
                    :timeout (or timeout 10)))
+
+(defun claude-pair-rpc-async-request (method params on-result &optional on-error timeout)
+  "Send METHOD with PARAMS to the daemon without waiting for the answer.
+ON-RESULT gets the result; ON-ERROR, if given, gets the error message.
+Give up after TIMEOUT seconds, 30 by default."
+  (let ((fail (lambda (message) (when on-error (funcall on-error message)))))
+    (jsonrpc-async-request (claude-pair-rpc-connection) method params
+                           :success-fn on-result
+                           :error-fn (lambda (err) (funcall fail (or (plist-get err :message) (format "%S" err))))
+                           :timeout-fn (lambda () (funcall fail "no answer in time"))
+                           :timeout (or timeout 30))))
 
 ;;;; Closing
 

@@ -194,10 +194,38 @@ starts.
 - [X] Open a chat, restart Emacs, =C-c c P=: the same chat comes back
   with "Reattached"
 
-* TODO M6 · Slash commands [0/2]
-- [ ] Spike: which slash commands the headless =claude= runs (built-in and
-  your own in =.claude/commands/=)
-- [ ] Type =/= in the chat for completion; run them
+* DONE M6 · Slash commands [2/2]
+- [X] Spike (real =claude= 2.1.327): headless =claude= runs built-in
+  commands (=/context=, =/usage=, =/model= answer as text at $0; =/compact=
+  compacts and keeps the conversation) and your own (=/greet Bob= from
+  =.claude/commands/=). The =initialize= control request lists all of
+  them with description, argument hint and aliases, without a model call.
+  =/clear= switches to a new session ID, so claude-pair runs its own;
+  =doctor=, =color=, =focus=, =reload-plugins= are terminal-only
+- [X] Type =/= in the chat for completion (description and argument hint
+  beside each; a space after one that takes arguments); they run as
+  Claude Code runs them, =/compact='s "Compacted" shown. =/clear= (=/reset=,
+  =/new=) starts a new chat, the old one kept for =claude-pair-resume=;
+  =/resume= opens the picker. The list loads when a chat starts, never
+  starting or reaching a daemon by itself (protocol 0.13.0,
+  =session/commands=)
+** Auto
+- [X] Go: the command list (terminal-only left out), =/compact='s output
+  and status, a project command, through the daemon. ERT: completion
+  (order, annotations, the space, only at the start), Claude Code's
+  commands run, =/clear= starts a new chat, aliases and =/resume= stay in
+  Emacs (4 tests). =make check= clean (224 ERT tests)
+** Live check run by Claude (21 Nov 2026, about $0.12)
+- [X] 71 commands listed in 0.6 s, your =greet= with "NAME   Greet someone
+  by name (project)", =/doctor= hidden; =/greet Bob= → "GREETINGS Bob";
+  =/context= drew its table. Screenshot of the completion list in a
+  headless window
+** Visual gate (your turn)
+- [X] In a chat type =/c= and =C-M-i= (or wait for Corfu): commands with
+  descriptions; run =/context=
+- [X] =/clear=: a new chat, the old one in =M-x claude-pair-resume=
+- [X] Add a command in =.claude/commands/=, =M-x claude-pair-slash-refresh=,
+  complete and run it
 
 * TODO M7 · Checkpoints and rewind [0/3]
 - [ ] Spike: how far the headless =claude= can resume a conversation from

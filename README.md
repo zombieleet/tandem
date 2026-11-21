@@ -285,6 +285,19 @@ edit proposal or permission question comes to you, since Claude is waiting
 for you, except when you are in another tab than Claude's: then your tab is
 left alone and the echo area tells you to switch (`C-x t o`).
 
+## Slash commands
+
+Type `/` at the start of a message and complete a command with
+`completion-at-point` (`C-M-i`, or as you type with Corfu or Company).
+You get Claude Code's own commands (`/compact`, `/context`, `/usage`,
+`/model`, `/init` …), your commands in `.claude/commands/` and
+`~/.claude/commands/`, skills and plugins, each with its description.
+They run as Claude Code runs them.
+
+`/clear` (or `/reset`, `/new`) starts a new chat, and the old one stays in
+`M-x claude-pair-resume`. `/resume` reopens an earlier chat. After you add
+a command, `M-x claude-pair-slash-refresh` reads the list again.
+
 ## Reopening earlier chats
 
 `M-x claude-pair-resume` lists the project's earlier chats, newest first,

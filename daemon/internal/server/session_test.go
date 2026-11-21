@@ -356,3 +356,49 @@ func TestListAndResumeAConversation(t *testing.T) {
 		"claudePath": fakeClaude}), protocol.UnknownSession)
 	wantCode(t, c2.request("session/list", map[string]string{"cwd": "relative"}), protocol.InvalidParams)
 }
+
+func TestSlashCommands(t *testing.T) {
+	d := startDaemon(t, 0, "cpd-")
+	c := ready(t, d)
+	id := createSession(t, c, fakeClaude)
+	m := c.request("session/commands", map[string]string{"sessionId": id})
+	wantOK(t, m)
+	var r struct {
+		Commands []struct {
+			Name, Description, ArgumentHint string
+			Aliases                         []string
+			Builtin                         bool
+		}
+	}
+	json.Unmarshal(m.Result, &r)
+	var names []string
+	for _, cmd := range r.Commands {
+		names = append(names, cmd.Name)
+	}
+	// The terminal-only /doctor is left out.
+	if strings.Join(names, ",") != "compact,clear,greet" || r.Commands[2].ArgumentHint != "NAME" ||
+		!r.Commands[0].Builtin || r.Commands[1].Aliases[0] != "reset" {
+		t.Fatalf("commands %+v", r.Commands)
+	}
+	wantCode(t, c.request("session/commands", map[string]string{"sessionId": "nope"}), protocol.UnknownSession)
+
+	// What /compact prints shows as text; the status says it compacts.
+	prompt(t, c, id, "/compact")
+	updates := c.untilIdle(id)
+	if got := turnText(updates); got != "Compacted\n" {
+		t.Fatalf("text %q", got)
+	}
+	compacting := false
+	for _, u := range updates {
+		if u["kind"] == "status" && u["state"] == "compacting" {
+			compacting = true
+		}
+	}
+	if !compacting {
+		t.Fatalf("no compacting status in %v", updates)
+	}
+	prompt(t, c, id, "/greet Bob")
+	if got := turnText(c.untilIdle(id)); got != "Ran /greet with Bob" {
+		t.Fatalf("text %q", got)
+	}
+}

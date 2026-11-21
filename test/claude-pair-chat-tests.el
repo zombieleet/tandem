@@ -302,6 +302,7 @@
 
 (ert-deftest claude-pair-chat-a-new-chat-carries-your-instructions ()
   (let ((claude-pair-instructions "Use simple English.")
+        (claude-pair-chat-session-functions nil)
         sent)
     (cl-letf (((symbol-function 'claude-pair-rpc-request)
                (lambda (method params &rest _) (when (eq method 'session/new) (setq sent params))

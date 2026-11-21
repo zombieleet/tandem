@@ -48,6 +48,7 @@
 (require 'claude-pair-mention)
 (require 'claude-pair-tools)
 (require 'claude-pair-resume)
+(require 'claude-pair-slash)
 
 ;;;###autoload
 (defun claude-pair-connect ()

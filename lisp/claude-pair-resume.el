@@ -158,6 +158,7 @@ What mentions attached, sent to Claude after your words, is left out."
           (when (eq (plist-get result :busy) t)
             (setq claude-pair-chat--state "running"
                   claude-pair-chat--replying t)))
+        (run-hook-with-args 'claude-pair-chat-session-functions buffer)
         buffer)))
 
 ;;;###autoload

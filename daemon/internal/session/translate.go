@@ -1,6 +1,14 @@
 package session
 
-import "time"
+import (
+	"regexp"
+	"strings"
+	"time"
+)
+
+// localOutput matches what a slash command that runs inside Claude Code,
+// such as /compact, prints.
+var localOutput = regexp.MustCompile(`(?s)<local-command-std(?:out|err)>(.*?)</local-command-std(?:out|err)>`)
 
 // translate turns one stream-json event into updates. It runs with s.mu held
 // and reports whether the event ended a turn. Events from subagents (those
@@ -97,6 +105,14 @@ func (s *Session) assistantEvent(p *process, event map[string]any) []Update {
 
 func (s *Session) userEvent(p *process, event map[string]any) []Update {
 	var updates []Update
+	if text, ok := object(event["message"])["content"].(string); ok {
+		for _, m := range localOutput.FindAllStringSubmatch(text, -1) {
+			if out := strings.TrimSpace(m[1]); out != "" {
+				updates = append(updates, Update{"kind": "text", "delta": out + "\n"})
+			}
+		}
+		return updates
+	}
 	for _, b := range list(object(event["message"])["content"]) {
 		block := object(b)
 		if block["type"] != "tool_result" {

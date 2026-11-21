@@ -304,6 +304,16 @@ func (d *Daemon) handle(ctx context.Context, c *client, method string, params js
 		return d.resumeSession(c, params)
 	case "session/prompt":
 		return d.prompt(c, params)
+	case "session/commands":
+		e, err := d.lookup(params, nil)
+		if err != nil {
+			return nil, err
+		}
+		commands, err := e.s.Commands(ctx)
+		if err != nil {
+			return nil, rpc.Errorf(protocol.ClaudeUnavailable, "%s", err.Error())
+		}
+		return map[string]any{"commands": commands}, nil
 	case "session/cancel":
 		var id string
 		e, err := d.lookup(params, &id)

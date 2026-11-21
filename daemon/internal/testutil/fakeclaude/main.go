@@ -116,12 +116,30 @@ func main() {
 	initDone := false
 	for scanner.Scan() {
 		var msg struct {
-			Type    string `json:"type"`
-			Message struct {
+			Type      string `json:"type"`
+			RequestID string `json:"request_id"`
+			Message   struct {
 				Content string `json:"content"`
 			} `json:"message"`
 		}
-		if json.Unmarshal(scanner.Bytes(), &msg) != nil || msg.Type != "user" {
+		if json.Unmarshal(scanner.Bytes(), &msg) != nil {
+			continue
+		}
+		if msg.Type == "control_request" {
+			// initialize: the commands, as Claude Code lists them.
+			emit(map[string]any{"type": "control_response", "response": map[string]any{
+				"subtype": "success", "request_id": msg.RequestID, "response": map[string]any{
+					"commands": []map[string]any{
+						{"name": "compact", "description": "Free up context by summarizing the conversation so far",
+							"argumentHint": "<optional custom summarization instructions>", "builtin": true},
+						{"name": "clear", "description": "Start a new session with empty context",
+							"aliases": []string{"reset", "new"}, "builtin": true},
+						{"name": "doctor", "description": "Diagnose the installation", "builtin": true},
+						{"name": "greet", "description": "Greet someone by name (project)", "argumentHint": "NAME"},
+					}}}})
+			continue
+		}
+		if msg.Type != "user" {
 			continue
 		}
 		if !initDone {
@@ -148,6 +166,9 @@ func turn(prompt string, args []string) {
 	name, arg := "echo", ""
 	if rest, ok := strings.CutPrefix(prompt, "script:"); ok {
 		name, arg, _ = strings.Cut(rest, ":")
+	} else if rest, ok := strings.CutPrefix(prompt, "/"); ok {
+		name = "slash"
+		arg = rest
 	}
 	switch name {
 	case "env": // env:A,B reports each variable as A=value or A unset
@@ -160,6 +181,16 @@ func turn(prompt string, args []string) {
 			}
 		}
 		streamText([]string{strings.Join(parts, " ")}, 0)
+		result("success", false, nil)
+	case "slash": // a slash command: /compact prints as Claude Code does; others answer
+		command, args, _ := strings.Cut(arg, " ")
+		if command == "compact" {
+			emit(map[string]any{"type": "system", "subtype": "status", "status": "compacting", "session_id": sessionID})
+			emit(map[string]any{"type": "user", "session_id": sessionID, "message": map[string]any{
+				"role": "user", "content": "<local-command-stdout>Compacted </local-command-stdout>"}})
+		} else {
+			assistant(nextMsg(), map[string]any{"type": "text", "text": "Ran /" + command + " with " + args})
+		}
 		result("success", false, nil)
 	case "hello":
 		streamText([]string{"Hel", "lo ", "wörld 🌍"}, 0)

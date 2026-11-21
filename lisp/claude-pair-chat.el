@@ -190,6 +190,14 @@ run in the chat buffer.")
 (defvar claude-pair-chat-show-user-function #'identity
   "Function that turns your message into what the transcript shows.")
 
+(defvar claude-pair-chat-send-functions nil
+  "Functions that may handle a message you send, instead of Claude.
+Each gets the text; the first that returns non-nil has handled it, and
+nothing goes to Claude.")
+
+(defvar claude-pair-chat-session-functions nil
+  "Functions called with a chat buffer whose session has just started or reopened.")
+
 (defvar claude-pair-chat-reattach-function #'ignore
   "Function returning a chat buffer for a project ROOT left open in the daemon.
 `claude-pair' calls it when the project has no chat buffer; nil from it
@@ -284,6 +292,7 @@ See `claude-pair-project-root'."
                   (format "*claude-pair: %s*" (file-name-nondirectory root)))))
     (with-current-buffer buffer
       (claude-pair-chat--setup (plist-get result :sessionId) root))
+    (run-hook-with-args 'claude-pair-chat-session-functions buffer)
     buffer))
 
 (defun claude-pair-chat--environment ()
@@ -413,6 +422,14 @@ always start a new session.  To reopen an older chat, use
   (let ((text (string-trim (claude-pair-chat--input-text))))
     (when (string-empty-p text)
       (user-error "Type a message after the prompt first"))
+    (if (run-hook-with-args-until-success 'claude-pair-chat-send-functions text)
+        (when (buffer-live-p (current-buffer))
+          (claude-pair-chat--set-input ""))
+      (claude-pair-chat--send-to-claude text))))
+
+(defun claude-pair-chat--send-to-claude (text)
+  "Send TEXT, your message, to Claude."
+  (progn
     (when (claude-pair-chat--busy-p)
       (user-error "Claude is still answering; C-c C-k stops it"))
     ;; Draw the message before sending, so it precedes any reply.

@@ -1,6 +1,6 @@
 # claude-pair protocol
 
-Version **0.12.0**. This document is the contract between the Emacs client
+Version **0.13.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -154,6 +154,26 @@ holds the conversation in order: `{kind: "user", text}` for the user's
 messages, `{kind: "text", text}` for Claude's words, `{kind: "tool", title,
 error}` for tool calls, with the titles of `tool_start` updates. Subagents'
 work, thinking and messages Claude Code adds itself are left out.
+
+### `session/commands` (client → daemon)
+
+Params: `sessionId`. The daemon starts a short-lived `claude` in the
+session's directory, with its environment, and asks it, through the
+stream-json `initialize` control request, which slash commands it offers:
+Claude Code's own, the project's and the user's commands, skills and
+plugins. No model is called. Result: `{commands: [{name, description,
+argumentHint, aliases, builtin}]}` in Claude Code's order, without the
+commands only its terminal interface runs (`doctor`, `color`, `focus`,
+`reload-plugins`). A `claude` that does not answer within 30 s fails with
+`-32005`.
+
+A prompt that starts with `/` runs the command, as Claude Code does in
+headless mode. A command that runs inside Claude Code, such as `/context`,
+answers with ordinary `text` updates; what one prints, such as `/compact`'s
+"Compacted", also comes as `text`. `/compact` reports `{kind: "status",
+state: "compacting"}` while it runs. Claude Code's `/clear` starts a new
+session ID, which the daemon does not follow, so clients start a new
+session instead.
 
 ### `session/prompt` (client → daemon)
 
