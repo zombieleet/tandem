@@ -145,6 +145,8 @@ binary to release and the fake claude."
                             (ignore-errors (tandem-stop-daemon))))
                         (delete-directory socket-dir t))
           (require 'package)
+          ;; Not the user's project list.
+          (setq project-list-file (expand-file-name "projects" tmp))
           (setq package-user-dir elpa
                 package-archives `(("local" . ,(file-name-as-directory archive)))
                 package-check-signature nil)

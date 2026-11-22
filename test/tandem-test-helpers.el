@@ -27,6 +27,19 @@
 (add-hook 'kill-emacs-hook
           (lambda () (ignore-errors (delete-directory tandem-test--attribution-directory t))))
 
+;; Never the user's own project list either: project.el remembers every
+;; project it sees, and the tests make many in temporary directories.
+(defconst tandem-test--emacs-directory (make-temp-file "cpt-emacs-" t)
+  "Where the tests let Emacs keep its own state, such as the project list.")
+(setq project-list-file (expand-file-name "projects" tandem-test--emacs-directory))
+(add-hook 'kill-emacs-hook
+          (lambda () (ignore-errors (delete-directory tandem-test--emacs-directory t))))
+
+;; The tests write their own files; Emacs 30.2 and later refuse to run
+;; Flymake backends in a file they do not trust, so trust them all here.
+(defvar trusted-content)
+(setq trusted-content :all)
+
 (defun tandem-test--wait-for (predicate &optional timeout)
   "Wait until PREDICATE returns non-nil or TIMEOUT seconds pass.
 Return the last value of PREDICATE."
