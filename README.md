@@ -1,6 +1,7 @@
 # tandem
 
-Pair programming with Claude Code in Emacs.
+Pair programming with Claude Code in Emacs. The full manual: `C-h i m tandem`
+(after `make info` in a checkout).
 
 tandem is an independent project, formerly called claude-pair. It is not
 made, endorsed or supported by Anthropic. Claude and Claude Code are
@@ -606,6 +607,8 @@ likely to change:
 make check    # go vet (Linux, macOS, Windows), gofmt, versions, byte-compile, checkdoc,
               # Go tests (race detector; the server's over TCP too), ERT tests over a socket and over TCP
               # (no test calls the model: they use daemon/bin/fakeclaude)
+make info     # the manual, doc/tandem.info; C-h i then finds it
+make reference  # regenerate the manual's list of every command and option
 make test-wine  # the daemon's tests built for Windows, run under Wine
 make test-lisp TANDEM_TEST_PACKAGES=~/.config/emacs/.local/straight/build-30.1
               # also the tests that need Magit and the like, from a directory of built packages
@@ -622,6 +625,7 @@ and `daemon/internal/version`; pushing it builds the daemons and publishes them.
 |---|---|
 | `lisp/` | The Emacs package |
 | `daemon/` | `tandemd`, in Go (`cmd/tandemd`, `internal/…`) |
+| `doc/` | The manual (`tandem.texi`; `make info` builds it, `C-h i` finds it) and its generated reference |
 | `protocol/PROTOCOL.md` | The contract between the two |
 | `SECURITY.md` | What tandem trusts, how each way in is guarded, and how to report a problem |
 | `test/` | ERT tests, shared helpers and the checkdoc runner |

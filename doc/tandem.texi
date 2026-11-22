@@ -1,0 +1,605 @@
+\input texinfo  @c -*- texinfo -*-
+@setfilename tandem.info
+@settitle tandem: pair programming with Claude Code in Emacs
+@documentencoding UTF-8
+@set VERSION 0.4.0
+
+@copying
+This manual is for tandem, version @value{VERSION}.
+
+Copyright @copyright{} 2026 Victory.
+
+@quotation
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.3 or
+any later version published by the Free Software Foundation; with no
+Invariant Sections, no Front-Cover Texts, and no Back-Cover Texts.
+@end quotation
+@end copying
+
+@dircategory Emacs misc features
+@direntry
+* tandem: (tandem).     Pair programming with Claude Code in Emacs.
+@end direntry
+
+@titlepage
+@title tandem
+@subtitle Pair programming with Claude Code in Emacs
+@subtitle Version @value{VERSION}
+@author Victory
+@page
+@vskip 0pt plus 1filll
+@insertcopying
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top tandem
+
+tandem lets you pair-program with Claude inside Emacs.  Claude runs in a
+background daemon, @command{tandemd}, which drives your own Claude Code
+(@command{claude}).  You chat with Claude in an Emacs buffer, review
+every edit it proposes in the file's own buffer, keep the lines it wrote
+in colour, and let it ask Emacs what Emacs knows.
+
+tandem is an independent project, formerly called claude-pair.  It is
+not made, endorsed or supported by Anthropic.  Claude and Claude Code
+are trademarks of Anthropic, PBC.
+
+This manual is for version @value{VERSION}.
+@end ifnottex
+
+@menu
+* Overview::                   What tandem is, in a few lines.
+* Installation::               The daemon, the package, the first start.
+* The chat::                   Talking to Claude.
+* Reviewing edits::            Every edit waits for you.
+* Claude's lines::             Colours, blame and git notes.
+* Context::                    What Claude learns from Emacs.
+* Plans and Org::              Plan first; Org tasks; Embark.
+* Chats over time::            Reopening, rewinding, several at once.
+* Commits::                    Magit.
+* Windows::                    The windows Claude opens for you.
+* The daemon::                 tandemd, sockets, Windows.
+* Troubleshooting::            When something does not work.
+* Security::                   What tandem trusts.
+* Reference::                  Every command and option.
+* Command Index::
+* Variable Index::
+@end menu
+
+@node Overview
+@chapter Overview
+
+tandem has two parts:
+
+@itemize
+@item
+@strong{The Emacs package}, in @file{lisp/}: the chat, the review of
+edits, the colours, and everything else you see.
+
+@item
+@strong{The daemon}, @command{tandemd}, written in Go.  It starts your
+Claude Code in its headless stream-json mode, one process per chat, and
+talks to Emacs over a private Unix socket (a local TCP port with a
+secret token on Windows).  It outlives Emacs, so a chat survives an Emacs
+restart.
+@end itemize
+
+Claude Code does the work: it reads files, runs commands and decides what
+to change.  tandem changes how that reaches you.  Claude's edits do not
+land on disk directly: they come to Emacs, where you review them hunk by
+hunk.  Commands Claude wants to run are put to you as questions in the
+chat.  Claude can also ask Emacs for diagnostics, definitions, outlines
+and your selection.
+
+@node Installation
+@chapter Installation
+
+You need Emacs 29.1 or later, and Claude Code 2.1.0 or later, logged in
+or set up with an API key, Amazon Bedrock or Google Vertex AI.  To build
+the daemon yourself you need Go 1.26 or later.
+
+@menu
+* The daemon binary::
+* The package::
+* First start::
+@end menu
+
+@node The daemon binary
+@section The daemon binary
+
+Build it from a checkout:
+
+@example
+git clone https://github.com/victory/tandem ~/src/tandem
+cd ~/src/tandem && make daemon      # daemon/bin/tandemd
+@end example
+
+The package finds a daemon built there by itself.  Or download a
+prebuilt one for Linux, macOS or Windows from the releases page, check it
+against @file{SHA256SUMS}, and put it on your @env{PATH} as
+@command{tandemd} (@command{tandemd.exe} on Windows).  If Emacs does not
+see your shell's @env{PATH}, set @code{tandem-daemon-command}.
+
+@node The package
+@section The package
+
+Load tandem at startup.  It takes about 60 milliseconds and starts no
+daemon, and from then on Claude's lines get their colour back in files
+you open, and commits get their git notes, before you open any chat.
+
+@lisp
+(use-package tandem
+  :load-path "~/src/tandem/lisp"
+  :demand t
+  :bind ("C-c C" . tandem))
+@end lisp
+
+Without @code{use-package}:
+
+@lisp
+(add-to-list 'load-path "~/src/tandem/lisp")
+(require 'tandem)
+(keymap-global-set "C-c C" #'tandem)
+@end lisp
+
+@code{repeat-mode} is worth turning on as well: after a key such as
+@kbd{M-g n}, plain @kbd{n} and @kbd{p} then keep going.
+
+@node First start
+@section First start
+
+@findex tandem
+In any file of a project, type @kbd{M-x tandem}.  The chat opens in a
+tab named ``Claude'', in a window on the right.  Type after the
+@samp{❯} prompt and send with @kbd{C-c C-c}.  The first message starts
+the daemon and Claude Code.
+
+The chat starts in the project's root: the version-control root by
+default, or the nearest folder with a @file{CLAUDE.md}, a
+@file{package.json} or another project file.  @xref{Reference}, under
+@code{tandem-project-root} and @code{tandem-project-markers}.
+
+@node The chat
+@chapter The chat
+
+@menu
+* Sending and stopping::
+* Questions from Claude::
+* Mentions::
+* Slash commands::
+* Code in the chat::
+@end menu
+
+@node Sending and stopping
+@section Sending and stopping
+
+@table @kbd
+@item C-c C-c
+Send your message.
+@item C-c C-k
+Stop Claude's answer.  Your next message goes on with the same
+conversation.
+@item M-p
+@itemx M-n
+Step through the messages you sent before.
+@item C-c C-r
+Send your review of deferred edits now (@pxref{Review styles}).
+@end table
+
+The header line shows the model, what Claude is doing, and what the chat
+has cost so far.  Each tool Claude uses is one line: @samp{▸} while it
+runs, @samp{✓} or @samp{✗} when done.
+
+@vindex tandem-instructions
+Every chat tells Claude how to write, from @code{tandem-instructions}:
+by default, in simple English with the correct technical terms.
+
+@node Questions from Claude
+@section Questions from Claude
+
+When Claude wants to run a command, or do anything else Claude Code asks
+permission for, the question appears in the chat.  On it:
+
+@table @kbd
+@item y
+Allow it once.
+@item a
+Always allow it.  Claude Code saves the narrowest rule, such as the exact
+command, in the project's @file{.claude/settings.local.json}.
+@item n
+Deny it.
+@item d
+Deny it and tell Claude why, or what to do instead.
+@item RET
+Choose from a menu.
+@end table
+
+@kbd{C-c C-p} answers the oldest question from anywhere in the chat.
+
+@node Mentions
+@section Mentions
+
+In a message, @samp{@@} points Claude at something you have in Emacs:
+
+@table @samp
+@item @@src/geo.py
+Any file of the project.
+@item @@buffer
+The buffer you were last in; its text too, if it has unsaved changes.
+@item @@region
+The region you last had there, with its place and code.
+@item @@diagnostics
+That buffer's Flymake or Flycheck diagnostics.
+@end table
+
+Complete them after @samp{@@} with @code{completion-at-point}, or pick one
+with @kbd{C-c @@}.  In the transcript, mentions are buttons that take you
+there.
+
+@node Slash commands
+@section Slash commands
+
+Type @samp{/} at the start of a message and the slash commands are listed
+at once: Claude Code's own (@samp{/compact}, @samp{/context},
+@samp{/usage}, @samp{/model}, @dots{}), your commands in
+@file{.claude/commands/}, skills and plugins.  They run as Claude Code
+runs them.  Four are tandem's own:
+
+@table @samp
+@item /clear
+Start a new chat; the old one stays in @code{tandem-resume}.  Also
+@samp{/reset} and @samp{/new}.
+@item /resume
+Reopen an earlier chat.
+@item /rewind
+Go back to before one of your messages (@pxref{Rewinding}).
+@item /plan @var{task}
+Have Claude plan first (@pxref{Plans}).
+@end table
+
+@findex tandem-slash-refresh
+After you add a command, @kbd{M-x tandem-slash-refresh} reads them again.
+
+@node Code in the chat
+@section Code in the chat
+
+Code in messages is shown as code: @samp{`inline code'} in a code colour
+with its backticks hidden, and fenced blocks coloured by their language's
+major mode, without running that mode's hooks.  Claude's answers are
+formatted as they stream; your message as you type it.
+
+@node Reviewing edits
+@chapter Reviewing edits
+
+Claude never writes files directly.  Each edit it proposes appears in
+the file's own buffer, split into hunks: the old lines struck through,
+the new ones shown in their place.
+
+@menu
+* Hunk by hunk::
+* Review styles::
+* The list of waiting hunks::
+@end menu
+
+@node Hunk by hunk
+@section Hunk by hunk
+
+On a hunk:
+
+@table @kbd
+@item C-c C-a
+Apply it.
+@item C-c C-k
+Reject it, with a reason if you like.
+@item C-c '
+Ask Claude about it; the answer shows as a note above the hunk.
+@item n
+@itemx p
+On the proposed text, go to the next or previous hunk.
+@item M-RET
+Show the popup next to the hunk, with buttons for the same.
+@end table
+
+The popup also opens by itself when you stay in a hunk
+(@code{tandem-popup-delay}).  In the chat, the edit's block takes
+@kbd{y} (apply all), @kbd{n} (reject all), @kbd{d} (reject with a
+reason) and @kbd{RET} (show it, and decide hunk by hunk).
+
+A buffer with no unsaved changes of yours is saved after Claude's edit
+is applied (@code{tandem-review-autosave}).
+
+@node Review styles
+@section Review styles
+
+@findex tandem-set-review-style
+@vindex tandem-review-style
+@kbd{M-x tandem-set-review-style} chooses how edits wait for you:
+
+@table @code
+@item blocking
+Claude waits until you decide each edit.  The default.
+@item deferred
+Claude goes on; your decisions go with your next message (@kbd{C-c C-r}
+sends them at once).
+@item auto-accept
+Edits are applied at once; you can still read and undo them.
+@end table
+
+@node The list of waiting hunks
+@section The list of waiting hunks
+
+@findex tandem-review
+@kbd{M-x tandem-review} lists every hunk waiting for you, in every
+buffer: @kbd{RET} shows one, @kbd{a} applies it, @kbd{r} rejects it,
+@kbd{?} asks Claude about it, @kbd{A} and @kbd{R} decide the whole edit.
+
+@node Claude's lines
+@chapter Claude's lines
+
+The lines Claude wrote keep a colour until someone else edits them.
+
+@itemize
+@item
+@findex tandem-blame
+@kbd{M-x tandem-blame} says who wrote the line at point: which chat,
+which model, when.
+
+@item
+They keep their colour after you close the file and restart Emacs: tandem
+remembers them in @file{~/.cache/tandem/attribution}, private to you.
+
+@item
+@vindex tandem-author-color
+@code{tandem-author-color} and @code{tandem-author-tint} choose the
+colour.
+@end itemize
+
+@menu
+* Git notes::
+@end menu
+
+@node Git notes
+@section Git notes
+
+With git notes, Claude's lines travel with the repository.  When you
+commit with Magit, a note on the new commit, in
+@code{refs/notes/tandem}, says which of the committed lines are Claude's:
+fingerprints of the lines and who wrote them, never the code, and no
+paths of your machine.  When you open a file whose colours this machine
+does not know, the nearest note on it gives them back.
+
+@findex tandem-notes-write
+@findex tandem-notes-share
+@kbd{M-x tandem-notes-write} writes the note for a commit made outside
+Emacs.  Notes stay local until you share them: @kbd{M-x
+tandem-notes-share} has a remote fetch them from then on, kept apart
+from yours, and pushes yours after asking.
+
+@node Context
+@chapter Context
+
+@menu
+* Asking about code::
+* What Emacs tells Claude::
+* Places Claude shows you::
+@end menu
+
+@node Asking about code
+@section Asking about code
+
+@findex tandem-ask
+@kbd{M-x tandem-ask} asks Claude about the region, or else the function
+or line at point.  The question goes to the chat with the file, the lines
+and the code, and the whole answer also appears as a note above the code.
+
+@node What Emacs tells Claude
+@section What Emacs tells Claude
+
+Claude can ask Emacs, without asking you, for:
+
+@table @code
+@item diagnostics
+A file's errors and warnings from Flymake or Flycheck.
+@item xref
+Where a symbol is defined or used, through Eglot, lsp-mode or the mode's
+own backend.
+@item imenu
+A file's outline.
+@item selection
+Where you are, and the text you have selected.
+@end table
+
+@node Places Claude shows you
+@section Places Claude shows you
+
+When Claude shows you a place, such as a definition, those lines are
+highlighted until you move out of them.  When a lookup finds several
+places, such as every call of a function, @kbd{M-g n} and @kbd{M-g p}
+step through them, each highlighted; with @code{repeat-mode}, plain
+@kbd{n} and @kbd{p} after the first.
+
+@findex tandem-locations
+@kbd{M-x tandem-locations} lists them.
+
+@node Plans and Org
+@chapter Plans and Org
+
+@menu
+* Plans::
+* Org tasks::
+* Embark::
+@end menu
+
+@node Plans
+@section Plans
+
+@findex tandem-plan
+@kbd{M-x tandem-plan}, or @samp{/plan @var{task}} in the chat, has Claude
+plan without changing anything.  The plan opens in an Org buffer beside
+the chat.  Edit it as you like, then:
+
+@table @kbd
+@item C-c C-c
+Let Claude go ahead with your version.
+@item C-c C-k
+Say no, with a reason Claude reads.
+@end table
+
+In the chat, @kbd{y} on the plan only opens it.
+
+@node Org tasks
+@section Org tasks
+
+@findex tandem-org-send-subtree
+@kbd{M-x tandem-org-send-subtree} on a heading sends the subtree to the
+project's chat as a task.  When Claude is done, its answer goes under the
+heading, in Org syntax.  With @kbd{C-u}, Claude plans first.
+
+@node Embark
+@section Embark
+
+With Embark, @kbd{@@} in its action menu asks Claude about the target: a
+file, a symbol (with where you are), or a region.
+
+@node Chats over time
+@chapter Chats over time
+
+@menu
+* Reopening::
+* Rewinding::
+* Several chats::
+@end menu
+
+@node Reopening
+@section Reopening
+
+@findex tandem-resume
+@kbd{M-x tandem-resume} lists the project's earlier chats, with their
+age, number of messages and cost.  The one you pick opens with its
+conversation, and Claude remembers all of it.  After Emacs restarts,
+@kbd{M-x tandem} reattaches the chat that was open in the project.
+
+@node Rewinding
+@section Rewinding
+
+@findex tandem-rewind
+@kbd{M-x tandem-rewind}, or @samp{/rewind}, asks which of your messages
+to go back to before.  The files Claude changed in Emacs from then on go
+back to how they were, Claude forgets that message and what came after,
+and your message is back in the composer.  Changes Claude made with shell
+commands are not taken back.
+
+@node Several chats
+@section Several chats
+
+@findex tandem-worktree
+@findex tandem-chats
+Several Claudes can work at once, each in its own git worktree.
+@kbd{M-x tandem-worktree} makes a worktree on a new branch and opens its
+chat.  @kbd{M-x tandem-chats} lists every chat with its project, branch,
+state, what waits for you and its cost: @kbd{RET} opens one, @kbd{k}
+closes it, @kbd{w} makes a worktree, @kbd{D} removes one.
+
+@node Commits
+@chapter Commits
+
+@findex tandem-magit-stage-claude
+@findex tandem-magit-draft-message
+@itemize
+@item
+@kbd{M-x tandem-magit-stage-claude} stages the hunks you accepted from
+Claude, and only those; your own changes stay unstaged.
+
+@item
+@kbd{M-x tandem-magit-draft-message}, in the commit message buffer, has
+Claude write the message from the staged diff and what was said in the
+chat, in a copy of the chat that is never saved.
+
+@item
+@vindex tandem-magit-trailer
+No @samp{Co-Authored-By} trailer is added unless you set
+@code{tandem-magit-trailer}.
+@end itemize
+
+@node Windows
+@chapter Windows
+
+Claude can show you files, in up to @code{tandem-max-windows} windows of
+the Claude tab.  It never takes your cursor, and leaves alone a window
+you used in the last @code{tandem-focus-guard-seconds} seconds.
+
+@node The daemon
+@chapter The daemon
+
+@command{tandemd} listens on
+@file{$XDG_RUNTIME_DIR/tandem/daemon.sock}, in a directory that must be
+private to you, and logs to @file{daemon.log} there.  It stops by itself
+after 10 minutes with no Emacs connected
+(@code{tandem-daemon-idle-timeout}).
+
+@findex tandem-stop-daemon
+@findex tandem-daemon-status
+@kbd{M-x tandem-daemon-status} shows its version, process and clients;
+@kbd{M-x tandem-stop-daemon} stops it.  After updating tandem, stop the
+old daemon so the next chat starts the new one; when the protocol has
+changed, tandem offers to.
+
+@vindex tandem-daemon-transport
+On Windows, whose Emacs has no Unix sockets, the daemon listens on a port
+of @code{127.0.0.1} only and writes the port and a secret token to
+@file{%LOCALAPPDATA%\tandem\daemon.json}; Emacs sends the token.
+
+@node Troubleshooting
+@chapter Troubleshooting
+
+@table @asis
+@item ``Cannot find tandemd''
+Run @command{make daemon} in the checkout, or set
+@code{tandem-daemon-command}.
+
+@item ``speaks protocol @dots{}''
+An older daemon is running: answer @kbd{y} to restart it, or @kbd{M-x
+tandem-stop-daemon}.
+
+@item ``@dots{} has mode 775, so other users can reach the socket''
+Make that directory private (@command{chmod 700}), or set
+@code{tandem-socket-path} to one that is.
+
+@item Claude is not logged in
+Run @command{claude} in a terminal and log in, or set the variables in
+@code{tandem-environment-variables} in Emacs.
+
+@item Something else
+@kbd{M-x tandem-events-buffer} shows every message between Emacs and the
+daemon; the daemon's log is next to its socket.
+@end table
+
+@node Security
+@chapter Security
+
+tandem trusts you, your Emacs, your user account and Claude Code.  It
+does not trust other users of the machine, the text Claude writes (it may
+repeat what a file or a page told it), or the files of a project.
+
+The socket's directory must be private; the Windows port needs a secret
+token; credentials go to Claude Code in its environment, never on a
+command line or in a log; paths outside the project are refused; every
+edit waits for you unless you chose otherwise; and text from Claude is
+shown, never run.  @file{SECURITY.md} in the repository has the details
+and says how to report a problem.
+
+@include reference.texi
+
+@node Command Index
+@unnumbered Command Index
+@printindex fn
+
+@node Variable Index
+@unnumbered Variable Index
+@printindex vr
+
+@bye

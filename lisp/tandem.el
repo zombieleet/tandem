@@ -54,6 +54,15 @@
 (require 'tandem-agents)
 (require 'tandem-notes)
 
+;; The manual, built in the checkout by make info: C-h i finds it there.
+(defconst tandem--doc-directory
+  (expand-file-name "../doc/" (file-name-directory (or load-file-name buffer-file-name "")))
+  "Where the manual is built in a checkout.")
+(when (file-exists-p (expand-file-name "dir" tandem--doc-directory))
+  (with-eval-after-load 'info
+    (defvar Info-additional-directory-list)
+    (add-to-list 'Info-additional-directory-list tandem--doc-directory t)))
+
 ;; Optional parts: each loads only with the package it works with.
 (autoload 'tandem-magit-stage-claude "tandem-magit"
   "Stage the hunks you accepted from Claude, and only those." t)

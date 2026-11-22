@@ -66,10 +66,25 @@ Windows, the first public release).
   Claude's coloured lines are still coloured
 - [X] =M-x tandem-chats=, =M-x tandem-resume=: your earlier chats are there
 
-* TODO M3 · Manual [0/2]
-- [ ] A Texinfo manual: install, use, every command and option, the
-  daemon, troubleshooting; =C-h i= finds it
-- [ ] =make info= builds it, =make check= checks it
+* DONE M3 · Manual [2/2]
+- [X] =doc/tandem.texi=: overview, installation, the chat (keys,
+  questions, mentions, slash commands, code), reviewing edits (hunks,
+  styles, the list), Claude's lines and git notes, context (asking,
+  Emacs tools, places), plans and Org, chats over time (reopening,
+  rewinding, several), commits, windows, the daemon, troubleshooting,
+  security; a reference of every command (62) and option (48) generated
+  from the code by =doc/gen-reference.el=, with command and option indexes
+- [X] =make info= builds =doc/tandem.info= and =doc/dir= (=make all= too);
+  in a checkout tandem adds =doc/= to Info's directories, so =C-h i= finds
+  the manual; =make check= fails when the reference no longer matches the
+  code or =makeinfo= warns
+** Auto
+- [X] =make check-manual= (in =make check=): reference up to date, no
+  =makeinfo= warnings. ERT: =C-h i= finds the manual, its Top and its
+  commands. Screenshot of a chapter in Info
+** Visual gate (your turn)
+- [X] =make info= in the checkout, restart Emacs, =C-h i m tandem RET=:
+  read a chapter or two; anything wrong, missing or unclear?
 
 * TODO M4 · Protocol 1.0 [0/2]
 - [ ] Read the protocol document through; settle what is left open

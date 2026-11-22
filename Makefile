@@ -7,9 +7,28 @@ VERSION ?= $(shell sed -n 's/^var Version = "\(.*\)"/\1/p' daemon/internal/versi
 DIST_TARGETS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 LDFLAGS := -s -w -X github.com/victory/tandem/daemon/internal/version.Version=$(VERSION)
 
-.PHONY: all deps daemon fakeclaude compile test test-lisp test-lisp-tcp test-daemon test-wine vet versions checkdoc check dist print-version clean help
+.PHONY: all deps daemon fakeclaude compile info reference check-manual test test-lisp test-lisp-tcp test-daemon test-wine vet versions checkdoc check dist print-version clean help
 
-all: daemon compile
+all: daemon compile info
+
+## reference: write doc/reference.texi, every command and option, from the code
+reference:
+	$(EMACS) -Q --batch -L lisp --eval '(setq load-prefer-newer t)' -l doc/gen-reference.el -f tandem-gen-reference doc/reference.texi
+
+## info: build the manual, doc/tandem.info, and doc/dir for C-h i (needs makeinfo)
+info:
+	@if command -v makeinfo >/dev/null; then \
+	  makeinfo --no-split -o doc/tandem.info doc/tandem.texi && \
+	  rm -f doc/dir && install-info --dir-file=doc/dir doc/tandem.info >/dev/null; \
+	else echo "makeinfo not found: skipping the manual (install texinfo to build it)"; fi
+
+## check-manual: the reference matches the code, and makeinfo has nothing to say
+check-manual:
+	@tmp=$$(mktemp) && $(EMACS) -Q --batch -L lisp --eval '(setq load-prefer-newer t)' -l doc/gen-reference.el -f tandem-gen-reference $$tmp && \
+	  if ! cmp -s $$tmp doc/reference.texi; then rm -f $$tmp; \
+	    echo "doc/reference.texi is out of date: run make reference"; exit 1; fi; rm -f $$tmp
+	@out=$$(makeinfo --no-split -o /dev/null doc/tandem.texi 2>&1); \
+	  if [ -n "$$out" ]; then echo "$$out"; exit 1; fi; echo "manual: up to date, no warnings"
 
 ## deps: download the daemon's Go modules
 deps:
@@ -107,10 +126,10 @@ checkdoc:
 test: test-daemon test-lisp test-lisp-tcp
 
 ## check: vet, compile, checkdoc and test
-check: vet versions compile checkdoc test
+check: vet versions compile checkdoc check-manual test
 
 clean:
-	rm -f lisp/*.elc test/*.elc
+	rm -f lisp/*.elc test/*.elc doc/tandem.info doc/dir
 	rm -rf daemon/bin dist
 
 help:
