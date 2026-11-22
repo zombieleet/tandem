@@ -35,6 +35,7 @@
 ;;   M-x tandem-disconnect      close the connection, keep the daemon
 ;;   M-x tandem-stop-daemon     stop the daemon
 ;;   M-x tandem-do              tell Claude to refactor, document, fix… the code here
+;;   M-x global-tandem-suggest-mode  grey code suggestions as you type; TAB inserts
 ;;   M-x tandem-events-buffer   show the protocol log
 
 ;;; Code:
@@ -47,6 +48,7 @@
 (require 'tandem-dashboard)
 (require 'tandem-ask)
 (require 'tandem-do)
+(require 'tandem-suggest)
 (require 'tandem-mention)
 (require 'tandem-tools)
 (require 'tandem-resume)

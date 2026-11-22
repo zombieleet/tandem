@@ -1,6 +1,6 @@
 # tandem protocol
 
-Version **0.17.0**. This document is the contract between the Emacs client
+Version **0.18.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `tandemd` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
@@ -408,6 +408,35 @@ sees:
 The window rules live in the client, not the daemon; the Emacs client's
 are described in its README.
 
+## Suggestions
+
+Code completion at the cursor, for grey suggestions shown as the user
+types. Each runs in a short claude process of its own: by default the model
+`claude-haiku-5-5`, no tools, no settings or MCP servers, a system prompt of
+a few lines, low effort, in an empty directory of the daemon's. The daemon
+starts the next process ahead of time, so its start-up is not waited for,
+and stops it after five minutes without a request.
+
+### `suggest/complete` (client → daemon)
+
+Params `{claudePath, model?, env?, token?, file?, language?, prefix,
+suffix}`: `prefix` and `suffix` are the text before and after the cursor,
+at most 64 KiB each; `file` is the file's name and `language` its language,
+both only told to Claude; `token` is any JSON value of the client's,
+returned with the text. While the text arrives the daemon sends the
+notification `suggest/text` `{token, text}` with the suggestion so far, to
+this client. Result `{token, text}`: the text to insert, cleaned of a code
+fence, of indentation the cursor's line already has, and of the rest of the
+line repeated at its end; it may be empty.
+
+One suggestion runs at a time, for all clients: a new request ends the one
+still running, which fails with `-32008`.
+
+### `suggest/cancel` (client → daemon)
+
+Params: none. Ends the suggestion running, which fails with `-32008`.
+Result `{cancelled}`: whether one was running.
+
 ### `shutdown` (client → daemon)
 
 Params: none, or `{token}`. Result `{ok: true}`. After sending the result
@@ -430,4 +459,5 @@ exits. Accepted before `initialize`; over TCP, only with the token then.
 | `-32005` | Claude Code unavailable: missing, not executable, too old, or failed to start |
 | `-32006` | Unknown permission request: answered or withdrawn already |
 | `-32007` | Unauthorized: a TCP client without the endpoint file's token |
+| `-32008` | Superseded: a newer suggestion request, or `suggest/cancel`, ended it |
 | `-32800` | Request cancelled with `$/cancelRequest` |

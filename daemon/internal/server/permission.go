@@ -87,11 +87,14 @@ func (d *Daemon) askPermission(ctx context.Context, c *client, params json.RawMe
 	d.mu.Lock()
 	d.permissions[req.id] = req
 	d.mu.Unlock()
-	defer func() {
+	// Forgotten before a withdrawal is announced, so an answer to it then
+	// is refused as unknown.
+	forget := func() {
 		d.mu.Lock()
 		delete(d.permissions, req.id)
 		d.mu.Unlock()
-	}()
+	}
+	defer forget()
 
 	rule := AlwaysRule(p.ToolName, input)
 	d.broadcast(p.SessionID, session.Update{
@@ -120,14 +123,23 @@ func (d *Daemon) askPermission(ctx context.Context, c *client, params json.RawMe
 		}
 		return allow(input, rule, a.Always), nil
 	case reason := <-req.withdraw:
+		forget()
 		d.broadcast(p.SessionID, session.Update{
 			"kind": "permission", "state": "withdrawn", "requestId": req.id, "reason": reason,
 		})
 		return deny(reason), nil
 	case <-ctx.Done():
+		// As for edits: a withdrawal waiting here says more.
+		reason := "Claude no longer needs an answer."
+		select {
+		case r := <-req.withdraw:
+			reason = r
+		default:
+		}
+		forget()
 		d.broadcast(p.SessionID, session.Update{
 			"kind": "permission", "state": "withdrawn", "requestId": req.id,
-			"reason": "Claude no longer needs an answer.",
+			"reason": reason,
 		})
 		return nil, ctx.Err()
 	}

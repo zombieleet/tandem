@@ -101,11 +101,14 @@ func (d *Daemon) proposeEdit(ctx context.Context, c *client, params json.RawMess
 	d.mu.Lock()
 	d.edits[req.id] = req
 	d.mu.Unlock()
-	defer func() {
+	// Forgotten before a withdrawal is announced, so an answer to it then
+	// is refused as unknown.
+	forget := func() {
 		d.mu.Lock()
 		delete(d.edits, req.id)
 		d.mu.Unlock()
-	}()
+	}
+	defer forget()
 
 	rel := relativeTo(e.s.Cwd(), path)
 	toolName := "mcp__emacs__edit_file"
@@ -123,6 +126,7 @@ func (d *Daemon) proposeEdit(ctx context.Context, c *client, params json.RawMess
 	})
 
 	withdrawn := func(reason string) {
+		forget()
 		_ = asker.conn.Notify("edit/withdraw", map[string]any{"requestId": req.id, "reason": reason})
 		d.broadcast(p.SessionID, session.Update{
 			"kind": "edit", "state": "withdrawn", "requestId": req.id, "reason": reason,
@@ -139,7 +143,15 @@ func (d *Daemon) proposeEdit(ctx context.Context, c *client, params json.RawMess
 		withdrawn(reason)
 		return failed("The edit was not made: " + reason)
 	case <-ctx.Done():
-		withdrawn("Claude no longer needs an answer.")
+		// Stopping a turn withdraws the edit, then interrupts Claude, which
+		// ends this call: both may be ready here, and the reason says more.
+		reason := "Claude no longer needs an answer."
+		select {
+		case r := <-req.withdraw:
+			reason = r
+		default:
+		}
+		withdrawn(reason)
 		return nil, ctx.Err()
 	}
 }

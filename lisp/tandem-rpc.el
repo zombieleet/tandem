@@ -48,7 +48,7 @@
 (defconst tandem-version "0.4.0"
   "Version of the tandem Emacs package.")
 
-(defvar tandem-rpc-protocol-version "0.17.0"
+(defvar tandem-rpc-protocol-version "0.18.0"
   "Protocol version this client speaks.  See protocol/PROTOCOL.md.")
 
 (defcustom tandem-daemon-command nil

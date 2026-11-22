@@ -27,6 +27,37 @@ func (c *testClient) nextUpdate(id string, match func(map[string]any) bool) map[
 	}
 }
 
+// untilIdleAnd reads notifications until session id is idle and one of
+// them, a session/update or any other, matched want; the two may come in
+// either order. It returns the session's updates and the params of the
+// match (the update itself for a session/update).
+func (c *testClient) untilIdleAnd(id string, want func(method string, params map[string]any) bool) ([]map[string]any, map[string]any) {
+	c.t.Helper()
+	var updates []map[string]any
+	var found map[string]any
+	idle := false
+	for !idle || found == nil {
+		m := c.note()
+		var params map[string]any
+		if m.Method == "session/update" {
+			var u update
+			json.Unmarshal(m.Params, &u)
+			if u.SessionID != id {
+				continue
+			}
+			params = u.Update
+			updates = append(updates, u.Update)
+			idle = idle || (u.Update["kind"] == "status" && u.Update["state"] == "idle")
+		} else {
+			json.Unmarshal(m.Params, &params)
+		}
+		if found == nil && want(m.Method, params) {
+			found = params
+		}
+	}
+	return updates, found
+}
+
 func waitPending(c *testClient, id string) map[string]any {
 	return c.nextUpdate(id, func(u map[string]any) bool { return u["kind"] == "permission" && u["state"] == "pending" })
 }
@@ -154,12 +185,15 @@ func TestCancelWithdrawsAPendingPermission(t *testing.T) {
 	if string(m.Result) != `{"cancelled":true}` {
 		t.Fatalf("cancel %s", m.Result)
 	}
-	w := c.nextUpdate(id, func(u map[string]any) bool { return u["kind"] == "permission" })
+	// The withdrawal and the end of the turn come in either order.
+	updates, w := c.untilIdleAnd(id, func(method string, u map[string]any) bool {
+		return method == "session/update" && u["kind"] == "permission"
+	})
 	if w["state"] != "withdrawn" || w["requestId"] != requestID || w["reason"] != "The user stopped the turn." {
 		t.Fatalf("got %v, want the request withdrawn", w)
 	}
 	var cancelled bool
-	for _, u := range c.untilIdle(id) {
+	for _, u := range updates {
 		if u["kind"] == "result" && u["cancelled"] == true {
 			cancelled = true
 		}

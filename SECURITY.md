@@ -36,6 +36,7 @@ everything tandem can, so tandem does not defend against them.
 | Text Claude writes | Coloured by major modes only; never turned into Org settings or clickable `elisp:` / `shell:` links |
 | Commit messages Claude drafts | The staged diff goes to `claude` on its standard input, never its command line |
 | What this machine remembers of Claude's lines | In `~/.cache/tandem/attribution`, directory `0700`, files `0600` |
+| Suggestions as you type | Only when you turn the mode on; only the file's name and the text around the cursor go, to a claude with no tools, no settings and no MCP servers, run in an empty directory of the daemon's; the text comes back as grey text, inserted only with `TAB` |
 | Git notes others may read | Line fingerprints, model, session ID and time: no code and no paths of your machine |
 
 ## Fixed in the review (November 2026)
@@ -69,6 +70,10 @@ Each fix has a test (`test/tandem-security-tests.el`).
 - **The read-only Emacs tools need no permission:** diagnostics, xref,
   imenu, and your selection (its text, when a region is active) go to
   Claude when it asks, as reading a file in the project would.
+- **Suggestions send code as you type:** with the mode on, the code around
+  the cursor goes to Claude at each pause after typing, also in a file
+  you have not asked Claude about (a secret in it included). Turn the mode
+  on only where you want that.
 - **The auto-accept review style** applies Claude's edits without asking:
   you choose it.
 - **Claude Code's own files** (transcripts and approved plans under

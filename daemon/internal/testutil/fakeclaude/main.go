@@ -10,7 +10,8 @@
 // edit_file or write_file over MCP, asking permission first unless
 // --allowedTools allows them. mcp:TOOL:JSON calls the emacs server's TOOL
 // with the arguments JSON, the same way; several calls can be chained with
-// " && ". Any other prompt is echoed back.
+// " && ". A prompt holding "fake-suggest:TEXT" answers TEXT, as a code
+// completion. Any other prompt is echoed back.
 //
 // For bash and webfetch it asks --permission-prompt-tool through the MCP
 // server in --mcp-config, as Claude Code does, and applies "always" rules
@@ -230,6 +231,9 @@ func controlInitialize(requestID string) {
 
 func turn(prompt string, args []string) {
 	emit(map[string]any{"type": "system", "subtype": "status", "status": "requesting", "session_id": sessionID})
+	if suggestScenario(prompt) {
+		return
+	}
 	name, arg := "echo", ""
 	modeMu.Lock()
 	planning := permissionMode == "plan"
@@ -448,6 +452,30 @@ func ask(tool string, input map[string]any, toolUseID string) (map[string]any, e
 		return nil, fmt.Errorf("Permission prompt tool returned invalid JSON: %v", err)
 	}
 	return decision, nil
+}
+
+// suggestScenario answers a code completion request whose code holds
+// "fake-suggest:TEXT", up to the end of the line or <CURSOR>, with TEXT
+// (\n is a newline) in two pieces; "fake-suggest:slow:TEXT" waits two
+// seconds between them. It reports whether the prompt was one.
+func suggestScenario(prompt string) bool {
+	i := strings.Index(prompt, "fake-suggest:")
+	if i < 0 {
+		return false
+	}
+	text := prompt[i+len("fake-suggest:"):]
+	if j := strings.IndexAny(text, "\n<"); j >= 0 {
+		text = text[:j]
+	}
+	var delay time.Duration
+	if rest, ok := strings.CutPrefix(text, "slow:"); ok {
+		text, delay = rest, 2*time.Second
+	}
+	text = strings.ReplaceAll(text, `\n`, "\n")
+	half := len(text) / 2
+	streamText([]string{text[:half], text[half:]}, delay)
+	result("success", false, map[string]any{"result": text})
+	return true
 }
 
 // editScenario calls edit_file or write_file once and reports the result.

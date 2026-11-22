@@ -178,11 +178,11 @@ func TestCancelWithdrawsAnEdit(t *testing.T) {
 	prompt(t, c, id, editPrompt(t, map[string]any{"file": "a.txt", "old": "x", "new": "y"}))
 	requestID := c.nextNotification("edit/propose")["requestId"].(string)
 	c.request("session/cancel", map[string]string{"sessionId": id})
-	w := c.nextNotification("edit/withdraw")
+	// The withdrawal and the end of the turn come in either order.
+	_, w := c.untilIdleAnd(id, func(method string, _ map[string]any) bool { return method == "edit/withdraw" })
 	if w["requestId"] != requestID || w["reason"] != "The user stopped the turn." {
 		t.Fatalf("withdraw %v", w)
 	}
-	c.untilIdle(id)
 	wantCode(t, answerEdit(c, requestID, map[string]any{"outcome": "applied"}), protocol.UnknownRequest)
 }
 

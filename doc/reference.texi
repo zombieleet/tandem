@@ -259,6 +259,14 @@ Read again the slash commands Claude Code has for the chat BUFFER. BUFFER is the
 @findex tandem-stop-daemon
 Stop the tandem daemon if it is running.
 
+@item M-x tandem-suggest-accept
+@findex tandem-suggest-accept
+Insert the suggestion shown at point.
+
+@item M-x tandem-suggest-now
+@findex tandem-suggest-now
+Ask Claude for a suggestion at point now, without waiting for a pause.
+
 @item M-x tandem-worktree
 @findex tandem-worktree
 Make a git worktree NAME on a new branch NAME, and open its chat. The worktree goes next to the repository (see @code{tandem-worktree-directory}), from the commit you have checked out; a branch NAME that exists already is checked out there instead.
@@ -458,6 +466,26 @@ Default: @code{t}.  Non-nil to list the slash commands as soon as you type / to 
 @item tandem-socket-path
 @vindex tandem-socket-path
 Default: @code{nil}.  Socket the daemon listens on, or nil for the default. The default is $XDG_RUNTIME_DIR/tandem/daemon.sock.  The directory holding the socket must be private to you (mode 700). With @code{tandem-daemon-transport} set to tcp, this is the endpoint file instead, %LOCALAPPDATA%\tandem\daemon.json by default on Windows.
+
+@item tandem-suggest-after
+@vindex tandem-suggest-after
+Default: @code{1500}.  How many characters after the cursor Claude sees.
+
+@item tandem-suggest-before
+@vindex tandem-suggest-before
+Default: @code{4000}.  How many characters before the cursor Claude sees.
+
+@item tandem-suggest-delay
+@vindex tandem-suggest-delay
+Default: @code{0.8}.  Seconds without typing before Claude is asked for a suggestion.
+
+@item tandem-suggest-mode-hook
+@vindex tandem-suggest-mode-hook
+Default: @code{nil}.  Hook run after entering or leaving @code{tandem-suggest-mode}. No problems result if this variable is not bound. @code{add-hook} automatically binds it.  (This is true for all hook variables.)
+
+@item tandem-suggest-model
+@vindex tandem-suggest-model
+Default: @code{"claude-haiku-5-5"}.  The model suggestions use: a fast, cheap one.
 
 @item tandem-tools-max-results
 @vindex tandem-tools-max-results

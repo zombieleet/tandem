@@ -116,6 +116,7 @@ emacs -Q -L ~/src/tandem/lisp --eval "(require 'tandem)"
 | `M-x tandem-notes-share` | Share Claude's git notes with a remote: fetch theirs, push yours |
 | `M-x tandem-ask` | Ask Claude about the region, or the function or line at point (`@claude …`) |
 | `M-x tandem-do` | Tell Claude to refactor, document, fix… the region or the function at point; the change comes as hunks |
+| `M-x global-tandem-suggest-mode` | Grey code suggestions when you pause typing; `TAB` inserts (`M-x tandem-suggest-now` asks at once) |
 | `M-x tandem-review` | List every hunk waiting for your review |
 | `M-x tandem-set-review-style` | Choose how Claude's edits wait for you: blocking, deferred, auto-accept |
 | `M-x tandem-blame` | Say who wrote the line at point (`C-u`: every run of Claude's lines) |
@@ -185,6 +186,19 @@ its edit tool: it comes to you as hunks in that buffer, to apply or
 reject. A grey line above the code says Claude is on it until it is done.
 `C-u M-x tandem-do` has Claude plan first. Add your own instructions to
 `tandem-do-actions`.
+
+## Suggestions as you type
+
+`(global-tandem-suggest-mode 1)`, or `M-x tandem-suggest-mode` in one
+buffer: stop typing for a moment and Claude suggests what comes next, the
+rest of the line or a block, in grey at the cursor. `TAB` inserts it;
+anything else goes on as usual, and typing what it starts with keeps the
+rest. `M-x tandem-suggest-now` asks at once. A suggestion takes one to
+three seconds, through Claude Code with your login: a small model
+(`tandem-suggest-model`, Haiku), no tools and a short system prompt, so
+each costs a tiny fraction of a cent. Only a pause after typing asks, not
+one after moving around; while Company's or Corfu's popup is open, `TAB`
+stays theirs.
 
 ## Where Claude starts
 

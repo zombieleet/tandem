@@ -385,6 +385,7 @@ from yours, and pushes yours after asking.
 @menu
 * Asking about code::
 * Telling Claude what to do::
+* Suggestions as you type::
 * What Emacs tells Claude::
 * Places Claude shows you::
 @end menu
@@ -412,6 +413,38 @@ edit tool, so it comes to you as hunks in that buffer (@pxref{Reviewing
 edits}).  A line above the code says Claude is on it until the turn ends.
 You stay where you are; a draft in the chat stays too.  With
 @kbd{C-u}, Claude plans first (@pxref{Plans and Org}).
+
+@node Suggestions as you type
+@section Suggestions as you type
+
+@findex tandem-suggest-mode
+@findex global-tandem-suggest-mode
+@findex tandem-suggest-now
+@findex tandem-suggest-accept
+@vindex tandem-suggest-delay
+@vindex tandem-suggest-model
+With @code{tandem-suggest-mode} on in a buffer, or
+@code{global-tandem-suggest-mode} for every file in a programming mode,
+Claude suggests the code that comes next when you stop typing for
+@code{tandem-suggest-delay} seconds: the rest of a line, or a block.  It
+appears in grey at the cursor; @kbd{TAB} inserts it.  Anything else you do
+goes on as usual and the suggestion goes away, except typing the
+character it starts with, which keeps the rest.  @kbd{M-x
+tandem-suggest-now} asks at once.  The mode line shows @samp{✦…} while
+one is on its way.
+
+A suggestion takes one to three seconds, so it does not follow every key.
+Only a pause after typing asks, not one after moving around, and not in
+the middle of a word, with a region, or while Company's or Corfu's popup
+is open (@kbd{TAB} is theirs then).  A newer request ends an older one.
+
+Each suggestion runs Claude Code with your login, a small model
+(@code{tandem-suggest-model}, Claude Haiku by default), no tools and a
+short system prompt, and costs a tiny fraction of a cent.  Claude sees the
+file's name and the text around the cursor
+(@code{tandem-suggest-before} and @code{tandem-suggest-after}
+characters), nothing else.  The daemon starts the next claude ahead of
+time, so you do not wait for it to start.
 
 @node What Emacs tells Claude
 @section What Emacs tells Claude

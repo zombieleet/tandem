@@ -109,17 +109,59 @@ Windows, the first public release).
 - [X] Select a few lines, =C-c c p=, type an instruction of your own
 - [X] =C-u C-c c p= Refactor: the plan opens in Org first
 
-* TODO M5 · Suggestions as you type [0/3]
-Measured: through Claude Code a suggestion takes 2.5-4 s (Haiku, a warm
-session in the daemon; about $0.003 each), too slow for every key, so
-(your choice) it comes after a pause or on a key, with your login and no
-API key.
-- [ ] The daemon keeps one warm, tool-less Haiku session for suggestions;
-  a request carries the code around point and is dropped when you type on
-- [ ] Ghost text at point after you pause (=tandem-suggest-delay=), or
-  at once on a key; =TAB= inserts it, any other key goes on as usual;
-  on in the modes you choose (=tandem-suggest-mode=)
-- [ ] Works beside Company and Corfu: their popup wins =TAB= while it is open
+* DONE M5 · Suggestions as you type [4/4]
+Measured: Claude Code with its own system prompt took 2.5-4 s and $0.003
+a suggestion; with no tools, a short system prompt and low effort it takes
+1.4-2.9 s (time to the whole suggestion, real Haiku through the daemon)
+and about $0.00001. So (your choice) it comes after a pause or on a key,
+with your login and no API key.
+- [X] The daemon: =suggest/complete= runs each suggestion in a short
+  claude process (Haiku, =--tools ""=, no settings or MCP servers, its
+  own system prompt, an empty directory), the next one started ahead of
+  time and stopped after five idle minutes; the text streams back as
+  =suggest/text=; a newer request, or =suggest/cancel=, ends the one
+  running (=-32008=). Cleaned of fences, repeated indentation and the rest
+  of the line repeated. Protocol 0.18.0
+- [X] Emacs: =tandem-suggest-mode= / =global-tandem-suggest-mode= (code
+  files): after a pause of =tandem-suggest-delay= that follows typing
+  (not moving, not undo, not Claude's edits), grey text at the cursor as
+  it arrives; =TAB= inserts, typing its first character keeps the rest,
+  anything else clears it; =M-x tandem-suggest-now= asks at once; =✦…= in
+  the mode line while waiting. In your Doom config: on, and =C-c c g=
+- [X] Beside Company and Corfu: no request and no suggestion while their
+  popup is open, so =TAB= stays theirs; not mid-word or with a region
+- [X] Your check (below): "passed and works well"
+** Auto
+- [X] Go (10 new): streaming and cleaning, the spare used and replaced, not
+  used for another model, a newer request ends the older, cancel and a
+  cancelled context, the unused spare stopped, missing claude; through the
+  socket and TCP: notifications with the token, bad params, the directory
+  removed at stop
+- [X] ERT (8 new): asked after typing only and once a pause; what is sent;
+  shown as it arrives, cursor before it, =TAB= inserts; typing through;
+  late answers and old tokens dropped; not mid-word, with a region or with
+  Company's popup; errors said once; the global mode only in code files;
+  for real with the fake claude. =make check= clean
+- [X] Found on the way, older than this milestone, shown up by the extra
+  load of the new tests: stopping a turn could withdraw a pending edit or
+  permission with "Claude no longer needs an answer" instead of "The user
+  stopped the turn" (both were ready; Go picked one at random), and Emacs
+  could still answer a request it had just been told was withdrawn. Now
+  the stated reason wins, and a request is forgotten before its withdrawal
+  is announced. The two cancel tests no longer assume the withdrawal comes
+  before the end of the turn; 100 runs under load pass, =make check= three
+  times in a row
+- [X] Live, real Haiku through a private daemon: "return 2 * math.pi * r"
+  in 1.4-2.9 s; a three-line =with open(...)= block in 1.6 s, indented
+  right after =TAB=
+** Visual gate (your turn)
+- [X] =make all=, restart Emacs (=y= when asked to restart the daemon: the
+  protocol is 0.18.0 now). In a Python or Go file type a function's first
+  line and pause: grey text after a second or two, =✦…= meanwhile; =TAB=
+  inserts it
+- [X] Type on while it shows: it goes; type its first letter: the rest stays
+- [X] With Company's popup open, =TAB= is still Company's
+- [X] =C-c c g= somewhere you did not type: a suggestion at once
 
 * TODO M6 · Protocol 1.0 [0/2]
 Started on branch =p5-m4-protocol= (parked, not yet checked); rebased

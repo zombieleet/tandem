@@ -28,6 +28,7 @@ import (
 	"github.com/victory/tandem/daemon/internal/protocol"
 	"github.com/victory/tandem/daemon/internal/rpc"
 	"github.com/victory/tandem/daemon/internal/session"
+	"github.com/victory/tandem/daemon/internal/suggest"
 )
 
 // AlreadyRunningError means another daemon answers on the socket.
@@ -98,6 +99,10 @@ type Daemon struct {
 
 	stopOnce sync.Once
 	done     chan struct{}
+
+	suggestMu  sync.Mutex
+	suggester  *suggest.Suggester
+	suggestDir string
 }
 
 // New returns a Daemon; call Start to listen.
@@ -240,6 +245,7 @@ func (d *Daemon) Stop(reason string) {
 			go func() { defer closing.Done(); s.Close() }()
 		}
 		closing.Wait()
+		d.stopSuggestions()
 		if d.ln != nil {
 			d.ln.Close()
 		}
@@ -452,6 +458,10 @@ func (d *Daemon) handle(ctx context.Context, c *client, method string, params js
 		return d.callEmacs(ctx, c, params)
 	case "tool/result":
 		return d.answerTool(c, params)
+	case "suggest/complete":
+		return d.suggest(ctx, c, params)
+	case "suggest/cancel":
+		return d.cancelSuggestion()
 	default:
 		return nil, rpc.Errorf(protocol.MethodNotFound, "unknown method %s", method)
 	}
