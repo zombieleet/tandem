@@ -141,7 +141,7 @@ in a checkout, the one @code{tandem-install-daemon} installed.
 Build it from a checkout:
 
 @example
-git clone https://github.com/victory/tandem ~/src/tandem
+git clone https://github.com/zombieleet/tandem ~/src/tandem
 cd ~/src/tandem && make daemon      # daemon/bin/tandemd
 @end example
 

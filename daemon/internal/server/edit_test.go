@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/victory/tandem/daemon/internal/protocol"
+	"github.com/zombieleet/tandem/daemon/internal/protocol"
 )
 
 func createSessionIn(t *testing.T, c *testClient, cwd string) string {

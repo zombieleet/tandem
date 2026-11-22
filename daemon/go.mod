@@ -1,4 +1,4 @@
-module github.com/victory/tandem/daemon
+module github.com/zombieleet/tandem/daemon
 
 go 1.26.0
 

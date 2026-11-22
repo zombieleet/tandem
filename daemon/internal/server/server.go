@@ -22,13 +22,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/victory/tandem/daemon/internal/endpoint"
-	"github.com/victory/tandem/daemon/internal/history"
-	"github.com/victory/tandem/daemon/internal/paths"
-	"github.com/victory/tandem/daemon/internal/protocol"
-	"github.com/victory/tandem/daemon/internal/rpc"
-	"github.com/victory/tandem/daemon/internal/session"
-	"github.com/victory/tandem/daemon/internal/suggest"
+	"github.com/zombieleet/tandem/daemon/internal/endpoint"
+	"github.com/zombieleet/tandem/daemon/internal/history"
+	"github.com/zombieleet/tandem/daemon/internal/paths"
+	"github.com/zombieleet/tandem/daemon/internal/protocol"
+	"github.com/zombieleet/tandem/daemon/internal/rpc"
+	"github.com/zombieleet/tandem/daemon/internal/session"
+	"github.com/zombieleet/tandem/daemon/internal/suggest"
 )
 
 // AlreadyRunningError means another daemon answers on the socket.

@@ -4,7 +4,7 @@
 
 ;; Author: Victory <osikwemhev@gmail.com>
 ;; Keywords: tools, convenience
-;; URL: https://github.com/victory/tandem
+;; URL: https://github.com/zombieleet/tandem
 
 ;; This file is not part of GNU Emacs.
 

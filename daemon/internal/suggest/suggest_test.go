@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/victory/tandem/daemon/internal/testutil"
+	"github.com/zombieleet/tandem/daemon/internal/testutil"
 )
 
 var fakeClaude string
@@ -20,7 +20,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	fakeClaude, err = testutil.Binary(dir, "fakeclaude", "github.com/victory/tandem/daemon/internal/testutil/fakeclaude")
+	fakeClaude, err = testutil.Binary(dir, "fakeclaude", "github.com/zombieleet/tandem/daemon/internal/testutil/fakeclaude")
 	if err != nil {
 		panic(err)
 	}

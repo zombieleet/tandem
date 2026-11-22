@@ -8,10 +8,10 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/victory/tandem/daemon/internal/mcphelper"
-	"github.com/victory/tandem/daemon/internal/protocol"
-	"github.com/victory/tandem/daemon/internal/rpc"
-	"github.com/victory/tandem/daemon/internal/session"
+	"github.com/zombieleet/tandem/daemon/internal/mcphelper"
+	"github.com/zombieleet/tandem/daemon/internal/protocol"
+	"github.com/zombieleet/tandem/daemon/internal/rpc"
+	"github.com/zombieleet/tandem/daemon/internal/session"
 )
 
 // A permission request travels like this: Claude Code calls the MCP

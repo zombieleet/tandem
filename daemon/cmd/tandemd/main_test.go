@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/victory/tandem/daemon/internal/testutil"
+	"github.com/zombieleet/tandem/daemon/internal/testutil"
 	"net"
 	"os"
 	"os/exec"
@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/victory/tandem/daemon/internal/endpoint"
-	"github.com/victory/tandem/daemon/internal/framing"
-	"github.com/victory/tandem/daemon/internal/protocol"
+	"github.com/zombieleet/tandem/daemon/internal/endpoint"
+	"github.com/zombieleet/tandem/daemon/internal/framing"
+	"github.com/zombieleet/tandem/daemon/internal/protocol"
 )
 
 // binary is the daemon built once for these tests: --detach re-executes it.

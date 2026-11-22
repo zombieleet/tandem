@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/victory/tandem/daemon/internal/protocol"
-	"github.com/victory/tandem/daemon/internal/rpc"
-	"github.com/victory/tandem/daemon/internal/session"
+	"github.com/zombieleet/tandem/daemon/internal/protocol"
+	"github.com/zombieleet/tandem/daemon/internal/rpc"
+	"github.com/zombieleet/tandem/daemon/internal/session"
 )
 
 // An edit travels like this: Claude calls edit_file or write_file on the

@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/victory/tandem/daemon/internal/session"
+	"github.com/zombieleet/tandem/daemon/internal/session"
 )
 
 // DefaultModel is the model suggestions use unless a request names one.

@@ -4,7 +4,7 @@
 
 ;; Author: Victory <osikwemhev@gmail.com>
 ;; Keywords: tools, convenience
-;; URL: https://github.com/victory/tandem
+;; URL: https://github.com/zombieleet/tandem
 
 ;; This file is not part of GNU Emacs.
 
@@ -47,7 +47,7 @@
   :group 'tandem)
 
 (defcustom tandem-daemon-release-url
-  "https://github.com/victory/tandem/releases/download/v%s/%s"
+  "https://github.com/zombieleet/tandem/releases/download/v%s/%s"
   "Where released daemons are: a format of the version and the file name."
   :type 'string
   :group 'tandem)

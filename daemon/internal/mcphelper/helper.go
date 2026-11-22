@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/victory/tandem/daemon/internal/endpoint"
-	"github.com/victory/tandem/daemon/internal/protocol"
-	"github.com/victory/tandem/daemon/internal/rpc"
-	"github.com/victory/tandem/daemon/internal/version"
+	"github.com/zombieleet/tandem/daemon/internal/endpoint"
+	"github.com/zombieleet/tandem/daemon/internal/protocol"
+	"github.com/zombieleet/tandem/daemon/internal/rpc"
+	"github.com/zombieleet/tandem/daemon/internal/version"
 )
 
 // ServerName and PermissionTool make up the permission tool's full name,

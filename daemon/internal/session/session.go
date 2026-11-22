@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/victory/tandem/daemon/internal/mcphelper"
+	"github.com/zombieleet/tandem/daemon/internal/mcphelper"
 )
 
 // Update is one session/update payload. "kind" says which fields it carries;

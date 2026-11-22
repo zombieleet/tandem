@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/victory/tandem/daemon/internal/protocol"
-	"github.com/victory/tandem/daemon/internal/rpc"
+	"github.com/zombieleet/tandem/daemon/internal/protocol"
+	"github.com/zombieleet/tandem/daemon/internal/rpc"
 )
 
 // A window tool call travels like this: Claude calls open_file,

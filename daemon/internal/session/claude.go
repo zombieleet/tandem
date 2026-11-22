@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/victory/tandem/daemon/internal/protocol"
+	"github.com/zombieleet/tandem/daemon/internal/protocol"
 )
 
 // MinClaudeVersion is the oldest Claude Code the daemon accepts. Development

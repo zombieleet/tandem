@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/victory/tandem/daemon/internal/endpoint"
-	"github.com/victory/tandem/daemon/internal/framing"
-	"github.com/victory/tandem/daemon/internal/protocol"
+	"github.com/zombieleet/tandem/daemon/internal/endpoint"
+	"github.com/zombieleet/tandem/daemon/internal/framing"
+	"github.com/zombieleet/tandem/daemon/internal/protocol"
 )
 
 // privateDir makes a fresh 0700 directory under the system temp dir. It avoids

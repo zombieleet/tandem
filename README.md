@@ -70,7 +70,7 @@ The manual is in `C-h i`.
 **The daemon.** Build it from a checkout:
 
 ```sh
-git clone https://github.com/victory/tandem ~/src/tandem
+git clone https://github.com/zombieleet/tandem ~/src/tandem
 cd ~/src/tandem && make daemon      # daemon/bin/tandemd
 ```
 

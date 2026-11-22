@@ -5,7 +5,7 @@ TESTS := $(wildcard test/*-tests.el)
 
 VERSION ?= $(shell sed -n 's/^var Version = "\(.*\)"/\1/p' daemon/internal/version/version.go)
 DIST_TARGETS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
-LDFLAGS := -s -w -buildid= -X github.com/victory/tandem/daemon/internal/version.Version=$(VERSION)
+LDFLAGS := -s -w -buildid= -X github.com/zombieleet/tandem/daemon/internal/version.Version=$(VERSION)
 
 .PHONY: all deps daemon fakeclaude compile info reference check-manual test test-lisp test-lisp-tcp test-daemon test-wine vet versions checkdoc check dist sums check-sums print-version print-go-release test-package clean help
 

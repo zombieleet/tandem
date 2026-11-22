@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/victory/tandem/daemon/internal/framing"
-	"github.com/victory/tandem/daemon/internal/protocol"
+	"github.com/zombieleet/tandem/daemon/internal/framing"
+	"github.com/zombieleet/tandem/daemon/internal/protocol"
 )
 
 // Error is a JSON-RPC error object. Handlers return one to choose the code.

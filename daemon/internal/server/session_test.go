@@ -3,7 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"github.com/victory/tandem/daemon/internal/testutil"
+	"github.com/zombieleet/tandem/daemon/internal/testutil"
 	"log/slog"
 	"net"
 	"os"
@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/victory/tandem/daemon/internal/protocol"
-	"github.com/victory/tandem/daemon/internal/session"
+	"github.com/zombieleet/tandem/daemon/internal/protocol"
+	"github.com/zombieleet/tandem/daemon/internal/session"
 )
 
 var fakeClaude, helperBinary string

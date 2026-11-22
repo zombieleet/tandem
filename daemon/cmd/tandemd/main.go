@@ -18,11 +18,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/victory/tandem/daemon/internal/mcphelper"
-	"github.com/victory/tandem/daemon/internal/paths"
-	"github.com/victory/tandem/daemon/internal/protocol"
-	"github.com/victory/tandem/daemon/internal/server"
-	"github.com/victory/tandem/daemon/internal/version"
+	"github.com/zombieleet/tandem/daemon/internal/mcphelper"
+	"github.com/zombieleet/tandem/daemon/internal/paths"
+	"github.com/zombieleet/tandem/daemon/internal/protocol"
+	"github.com/zombieleet/tandem/daemon/internal/server"
+	"github.com/zombieleet/tandem/daemon/internal/version"
 )
 
 const exitAlreadyRunning = 3

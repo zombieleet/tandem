@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/victory/tandem/daemon/internal/protocol"
-	"github.com/victory/tandem/daemon/internal/rpc"
-	"github.com/victory/tandem/daemon/internal/suggest"
+	"github.com/zombieleet/tandem/daemon/internal/protocol"
+	"github.com/zombieleet/tandem/daemon/internal/rpc"
+	"github.com/zombieleet/tandem/daemon/internal/suggest"
 )
 
 // maxSuggestContext is the most code a suggestion request may carry on

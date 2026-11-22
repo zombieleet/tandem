@@ -6,7 +6,7 @@
 ;; Version: 0.4.0
 ;; Package-Requires: ((emacs "29.1") (jsonrpc "1.0.25"))
 ;; Keywords: tools, convenience
-;; URL: https://github.com/victory/tandem
+;; URL: https://github.com/zombieleet/tandem
 
 ;; This file is not part of GNU Emacs.
 

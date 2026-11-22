@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/victory/tandem/daemon/internal/protocol"
+	"github.com/zombieleet/tandem/daemon/internal/protocol"
 )
 
 func TestSuggestions(t *testing.T) {
