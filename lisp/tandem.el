@@ -34,6 +34,7 @@
 ;;   M-x tandem-daemon-status   show the daemon's version, pid and clients
 ;;   M-x tandem-disconnect      close the connection, keep the daemon
 ;;   M-x tandem-stop-daemon     stop the daemon
+;;   M-x tandem-do              tell Claude to refactor, document, fix… the code here
 ;;   M-x tandem-events-buffer   show the protocol log
 
 ;;; Code:
@@ -45,6 +46,7 @@
 (require 'tandem-popup)
 (require 'tandem-dashboard)
 (require 'tandem-ask)
+(require 'tandem-do)
 (require 'tandem-mention)
 (require 'tandem-tools)
 (require 'tandem-resume)

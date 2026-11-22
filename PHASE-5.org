@@ -6,8 +6,8 @@ automatic checks, a check by you, and its own branch; a commit follows
 your "Mx passed". Anything that leaves this machine (a GitHub repository,
 a push, a MELPA request) waits for your explicit go-ahead.
 
-Order: what can be done here first (security, name, manual, protocol,
-packaging), then what needs a GitHub repository (CI on macOS and
+Order: what can be done here first (security, name, manual, actions on
+code, suggestions, protocol, packaging), then what needs a GitHub repository (CI on macOS and
 Windows, the first public release).
 
 * DONE M1 · Security review [3/3]
@@ -86,22 +86,59 @@ Windows, the first public release).
 - [X] =make info= in the checkout, restart Emacs, =C-h i m tandem RET=:
   read a chapter or two; anything wrong, missing or unclear?
 
-* TODO M4 · Protocol 1.0 [0/2]
+* DONE M4 · Telling Claude what to do with code [2/2]
+- [X] =M-x tandem-do= on the region, or else the function or line at
+  point: pick Refactor, Simplify, Document, Type hints, Fix, Tests or Error
+  handling (=tandem-do-actions=, yours to extend), or type any instruction.
+  Claude gets the file, the lines, the code and what Emacs reports there,
+  and changes it with its edit tool: hunks in that buffer, reviewed as
+  usual. A grey line above the code says Claude is on it until the turn
+  ends; you are not moved, a chat draft stays; =C-u= plans first. In the
+  manual and the README; =C-c c p= in your Doom config
+- [X] Your check (below): "works like magic"
+** Auto
+- [X] ERT (7 new): the instruction for an action and for your own text,
+  region and function; what Emacs reports in that code, and only there;
+  the working line, gone when the turn ends; plan mode with =C-u=; the
+  draft kept, nothing sent while Claude is busy; for real with the fake
+  claude, the edit arrives as a hunk and applies. =make check= clean
+** Visual gate (your turn)
+- [X] =make all= in the checkout, restart Emacs. In a Python or Go file,
+  point in a function, =C-c c p=, pick Document: the grey line shows, the
+  docstring arrives as a hunk, =C-c C-a= applies it
+- [X] Select a few lines, =C-c c p=, type an instruction of your own
+- [X] =C-u C-c c p= Refactor: the plan opens in Org first
+
+* TODO M5 · Suggestions as you type [0/3]
+Measured: through Claude Code a suggestion takes 2.5-4 s (Haiku, a warm
+session in the daemon; about $0.003 each), too slow for every key, so
+(your choice) it comes after a pause or on a key, with your login and no
+API key.
+- [ ] The daemon keeps one warm, tool-less Haiku session for suggestions;
+  a request carries the code around point and is dropped when you type on
+- [ ] Ghost text at point after you pause (=tandem-suggest-delay=), or
+  at once on a key; =TAB= inserts it, any other key goes on as usual;
+  on in the modes you choose (=tandem-suggest-mode=)
+- [ ] Works beside Company and Corfu: their popup wins =TAB= while it is open
+
+* TODO M6 · Protocol 1.0 [0/2]
+Started on branch =p5-m4-protocol= (parked, not yet checked); rebased
+after M5, which adds to the protocol.
 - [ ] Read the protocol document through; settle what is left open
 - [ ] Version 1.0.0: compatible while the major number matches
 
-* TODO M5 · Packaging [0/3]
+* TODO M7 · Packaging [0/3]
 - [ ] Package headers and =package-lint= clean
 - [ ] A MELPA recipe; the daemon downloaded and checked by Emacs on first
   use, or built from the checkout
 - [ ] Installing from a package, not the checkout, works end to end
 
-* TODO M6 · GitHub [0/3]
+* TODO M8 · GitHub [0/3]
 - [ ] A GitHub repository (you create it, or tell me to), the code pushed
 - [ ] CI green on Linux, macOS and Windows
 - [ ] The first release: tag, daemons and SHA256SUMS published
 
-* TODO M7 · Release 1.0 [0/3]
+* TODO M9 · Release 1.0 [0/3]
 - [ ] Your week of daily use (open since phase 1)
 - [ ] MELPA request, once you say so
 - [ ] Version 1.0.0

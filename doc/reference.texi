@@ -135,6 +135,10 @@ Show the hunk on this line in its file.
 @findex tandem-disconnect
 Close the connection to the daemon and leave the daemon running.
 
+@item M-x tandem-do
+@findex tandem-do
+Tell Claude to do CHOICE with the region, or the function or line at point. CHOICE is a name from @code{tandem-do-actions} or an instruction of your own. Claude's change comes as hunks in this buffer for you to review.  With PLAN (\[universal-argument]), Claude plans first, in an Org buffer you can edit.
+
 @item M-x tandem-events-buffer
 @findex tandem-events-buffer
 Show the log of messages exchanged with the daemon.
@@ -326,6 +330,10 @@ Default: @code{10}.  Seconds to wait for a newly started daemon to accept connec
 @item tandem-daemon-transport
 @vindex tandem-daemon-transport
 Default: @code{unix}.  How Emacs reaches the daemon. unix: a Unix socket.  tcp: a port on this machine only, which the daemon writes with a secret token to an endpoint file; Emacs on Windows has no Unix sockets.
+
+@item tandem-do-actions
+@vindex tandem-do-actions
+Default: @code{(("Refactor" . "Refactor this code to...}.  Instructions @code{tandem-do} offers, as (NAME . INSTRUCTION). You can always type your own instead.
 
 @item tandem-environment-variables
 @vindex tandem-environment-variables

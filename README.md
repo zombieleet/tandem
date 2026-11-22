@@ -115,6 +115,7 @@ emacs -Q -L ~/src/tandem/lisp --eval "(require 'tandem)"
 | `M-x tandem-magit-draft-message` | In a commit message buffer: Claude writes the message from the diff and the chat |
 | `M-x tandem-notes-share` | Share Claude's git notes with a remote: fetch theirs, push yours |
 | `M-x tandem-ask` | Ask Claude about the region, or the function or line at point (`@claude …`) |
+| `M-x tandem-do` | Tell Claude to refactor, document, fix… the region or the function at point; the change comes as hunks |
 | `M-x tandem-review` | List every hunk waiting for your review |
 | `M-x tandem-set-review-style` | Choose how Claude's edits wait for you: blocking, deferred, auto-accept |
 | `M-x tandem-blame` | Say who wrote the line at point (`C-u`: every run of Claude's lines) |
@@ -173,6 +174,17 @@ handling here") and you get a proposed edit, reviewed as usual. Asking
 never moves you: no tab switch, the chat is not selected, and a draft you
 were typing in the chat stays. Bind it to a key you like, for example
 `(keymap-global-set "C-c a" #'tandem-ask)`.
+
+## Telling Claude what to change
+
+Put point in a function, or select some code, and `M-x tandem-do`: pick
+Refactor, Simplify, Document, Type hints, Fix, Tests or Error handling, or
+type your own instruction ("rename main to run"). Claude gets the code,
+where it is and the errors Emacs reports there, and makes the change with
+its edit tool: it comes to you as hunks in that buffer, to apply or
+reject. A grey line above the code says Claude is on it until it is done.
+`C-u M-x tandem-do` has Claude plan first. Add your own instructions to
+`tandem-do-actions`.
 
 ## Where Claude starts
 
