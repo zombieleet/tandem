@@ -3,7 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"github.com/victory/claude-pair/daemon/internal/testutil"
+	"github.com/victory/tandem/daemon/internal/testutil"
 	"log/slog"
 	"net"
 	"os"
@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/victory/claude-pair/daemon/internal/protocol"
-	"github.com/victory/claude-pair/daemon/internal/session"
+	"github.com/victory/tandem/daemon/internal/protocol"
+	"github.com/victory/tandem/daemon/internal/session"
 )
 
 var fakeClaude, helperBinary string
@@ -28,7 +28,7 @@ func TestMain(m *testing.M) {
 	if fakeClaude, err = testutil.Binary(dir, "fakeclaude", "../testutil/fakeclaude"); err != nil {
 		panic(err)
 	}
-	if helperBinary, err = testutil.Binary(dir, "claude-paird", "../../cmd/claude-paird"); err != nil {
+	if helperBinary, err = testutil.Binary(dir, "tandemd", "../../cmd/tandemd"); err != nil {
 		panic(err)
 	}
 	code := m.Run()

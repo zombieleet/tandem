@@ -5,7 +5,7 @@ TESTS := $(wildcard test/*-tests.el)
 
 VERSION ?= $(shell sed -n 's/^var Version = "\(.*\)"/\1/p' daemon/internal/version/version.go)
 DIST_TARGETS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
-LDFLAGS := -s -w -X github.com/victory/claude-pair/daemon/internal/version.Version=$(VERSION)
+LDFLAGS := -s -w -X github.com/victory/tandem/daemon/internal/version.Version=$(VERSION)
 
 .PHONY: all deps daemon fakeclaude compile test test-lisp test-lisp-tcp test-daemon test-wine vet versions checkdoc check dist print-version clean help
 
@@ -15,9 +15,9 @@ all: daemon compile
 deps:
 	cd daemon && $(GO) mod download
 
-## daemon: build daemon/bin/claude-paird
+## daemon: build daemon/bin/tandemd
 daemon:
-	cd daemon && $(GO) build -trimpath -o bin/claude-paird ./cmd/claude-paird
+	cd daemon && $(GO) build -trimpath -o bin/tandemd ./cmd/tandemd
 
 # Release binaries carry Go's standard library: build them with a Go that
 # has the security fixes govulncheck asks for (see SECURITY.md).
@@ -33,10 +33,10 @@ dist:
 	cd daemon && for target in $(DIST_TARGETS); do \
 	  os=$${target%/*}; arch=$${target#*/}; ext=; [ $$os = windows ] && ext=.exe; \
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags '$(LDFLAGS)' \
-	    -o ../dist/claude-paird-$(VERSION)-$$os-$$arch$$ext ./cmd/claude-paird || exit 1; \
+	    -o ../dist/tandemd-$(VERSION)-$$os-$$arch$$ext ./cmd/tandemd || exit 1; \
 	done
-	cd dist && if command -v sha256sum >/dev/null; then sha256sum claude-paird-* > SHA256SUMS; \
-	  else shasum -a 256 claude-paird-* > SHA256SUMS; fi
+	cd dist && if command -v sha256sum >/dev/null; then sha256sum tandemd-* > SHA256SUMS; \
+	  else shasum -a 256 tandemd-* > SHA256SUMS; fi
 
 ## fakeclaude: build the stand-in for Claude Code that the ERT tests use
 fakeclaude:
@@ -57,7 +57,7 @@ test-lisp: daemon fakeclaude
 
 ## test-lisp-tcp: the ERT suite with the daemon on a local TCP port, as on Windows
 test-lisp-tcp: daemon fakeclaude
-	CLAUDE_PAIR_TEST_TRANSPORT=tcp $(EMACS) -Q --batch -L lisp -L test \
+	TANDEM_TEST_TRANSPORT=tcp $(EMACS) -Q --batch -L lisp -L test \
 	  --eval '(setq load-prefer-newer t)' \
 	  $(addprefix -l ,$(TESTS)) -f ert-run-tests-batch-and-exit </dev/null
 
@@ -72,7 +72,7 @@ WINE_DIR := $(CURDIR)/daemon/bin/wine
 test-wine:
 	rm -rf $(WINE_DIR)/*.exe $(WINE_DIR)/bin && mkdir -p $(WINE_DIR)/bin
 	cd daemon && GOOS=windows $(GO) build -o $(WINE_DIR)/bin/fakeclaude.exe ./internal/testutil/fakeclaude
-	cd daemon && GOOS=windows $(GO) build -o $(WINE_DIR)/bin/claude-paird.exe ./cmd/claude-paird
+	cd daemon && GOOS=windows $(GO) build -o $(WINE_DIR)/bin/tandemd.exe ./cmd/tandemd
 	cd daemon && for pkg in $$($(GO) list -f '{{if .TestGoFiles}}{{.Dir}}{{end}}' ./...); do \
 	  name=$$(basename $$pkg); GOOS=windows $(GO) test -c -o $(WINE_DIR)/$$name.test.exe $$pkg || exit 1; \
 	  echo "== $$name"; \
@@ -91,10 +91,10 @@ vet:
 
 ## versions: check the daemon and the Emacs package carry the same version
 versions:
-	@package="$$(sed -n 's/^;; Version: //p' lisp/claude-pair.el)"; \
-	  client="$$(sed -n 's/^(defconst claude-pair-version "\(.*\)"/\1/p' lisp/claude-pair-rpc.el)"; \
+	@package="$$(sed -n 's/^;; Version: //p' lisp/tandem.el)"; \
+	  client="$$(sed -n 's/^(defconst tandem-version "\(.*\)"/\1/p' lisp/tandem-rpc.el)"; \
 	  if [ "$$package" != "$(VERSION)" ] || [ "$$client" != "$(VERSION)" ]; then \
-	    echo "lisp/claude-pair.el says $$package, claude-pair-rpc.el $$client, the daemon $(VERSION)"; exit 1; fi
+	    echo "lisp/tandem.el says $$package, tandem-rpc.el $$client, the daemon $(VERSION)"; exit 1; fi
 
 print-version:
 	@echo $(VERSION)

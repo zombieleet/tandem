@@ -26,7 +26,7 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME#v}"
           daemon="$(make -s print-version)"
-          package="$(sed -n 's/^;; Version: //p' lisp/claude-pair.el)"
+          package="$(sed -n 's/^;; Version: //p' lisp/tandem.el)"
           if [ "$tag" != "$daemon" ] || [ "$tag" != "$package" ]; then
             echo "tag $tag, daemon $daemon, package $package: they must match"; exit 1
           fi

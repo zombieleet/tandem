@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/victory/claude-pair/daemon/internal/protocol"
-	"github.com/victory/claude-pair/daemon/internal/rpc"
+	"github.com/victory/tandem/daemon/internal/protocol"
+	"github.com/victory/tandem/daemon/internal/rpc"
 )
 
 // A window tool call travels like this: Claude calls open_file,
@@ -56,7 +56,7 @@ func (d *Daemon) callEmacs(ctx context.Context, c *client, params json.RawMessag
 	asker := d.askerLocked(e)
 	d.mu.Unlock()
 	if e == nil {
-		return failed("claude-pair has no such session.")
+		return failed("tandem has no such session.")
 	}
 	if verb, ok := toolsWithPaths[p.Tool]; ok {
 		path, _ := p.Args["path"].(string)

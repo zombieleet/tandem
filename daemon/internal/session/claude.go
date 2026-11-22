@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/victory/claude-pair/daemon/internal/protocol"
+	"github.com/victory/tandem/daemon/internal/protocol"
 )
 
 // MinClaudeVersion is the oldest Claude Code the daemon accepts. Development
@@ -45,7 +45,7 @@ var (
 // cached until the file changes.
 func CheckClaude(path string) (string, error) {
 	if path == "" {
-		return "", unavailable("no claude command given; install Claude Code or set claude-pair-claude-command")
+		return "", unavailable("no claude command given; install Claude Code or set tandem-claude-command")
 	}
 	if !filepath.IsAbs(path) {
 		return "", unavailable("the claude command must be an absolute path, got %q", path)
@@ -78,7 +78,7 @@ func CheckClaude(path string) (string, error) {
 	}
 	version := m[1]
 	if !atLeast(version, MinClaudeVersion) {
-		return "", unavailable("Claude Code %s is too old; claude-pair needs %s or later (run claude update)", version, MinClaudeVersion)
+		return "", unavailable("Claude Code %s is too old; tandem needs %s or later (run claude update)", version, MinClaudeVersion)
 	}
 	versionMu.Lock()
 	versionCache[path] = cachedVersion{modTime: info.ModTime(), version: version}

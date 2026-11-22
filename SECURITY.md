@@ -1,6 +1,6 @@
 # Security
 
-claude-pair is a tool for one person on their own machine. This document
+tandem is a tool for one person on their own machine. This document
 says what it trusts, what it treats as untrusted, how each way in is
 guarded, and what the review of November 2026 found and fixed.
 
@@ -8,7 +8,7 @@ guarded, and what the review of November 2026 found and fixed.
 
 **Trusted:** you, your Emacs, your user account, and Claude Code (`claude`)
 as you installed it. Anyone who runs programs as your user can already do
-everything claude-pair can, so claude-pair does not defend against them.
+everything tandem can, so tandem does not defend against them.
 
 **Not trusted:**
 
@@ -18,7 +18,7 @@ everything claude-pair can, so claude-pair does not defend against them.
   your Org files. It may repeat what a file in the project or a web page
   told it to say (a prompt injection), so it is displayed, never run.
 - **Files in a project.** Claude may read and propose to change them;
-  claude-pair never runs code from them by itself.
+  tandem never runs code from them by itself.
 
 ## Ways in, and how they are guarded
 
@@ -31,11 +31,11 @@ everything claude-pair can, so claude-pair does not defend against them.
 | Paths in Claude's tool calls | Made absolute and refused outside the project, symbolic links resolved; on Windows a path such as `\etc\hosts` is read on the project's drive, not inside the project |
 | Session IDs from Emacs | Must be UUIDs before they name a transcript file, so no path can be built from one |
 | Edits | Every edit Claude proposes waits for your review in the buffer, unless you chose the auto-accept review style |
-| Commands Claude runs | Claude Code asks, and claude-pair puts the question to you; "always allow" saves the narrowest rule (the exact command, or a web domain) |
+| Commands Claude runs | Claude Code asks, and tandem puts the question to you; "always allow" saves the narrowest rule (the exact command, or a web domain) |
 | Files Claude names | Opened with only safe file-local variables, never `eval:` ones |
 | Text Claude writes | Coloured by major modes only; never turned into Org settings or clickable `elisp:` / `shell:` links |
 | Commit messages Claude drafts | The staged diff goes to `claude` on its standard input, never its command line |
-| What this machine remembers of Claude's lines | In `~/.cache/claude-pair/attribution`, directory `0700`, files `0600` |
+| What this machine remembers of Claude's lines | In `~/.cache/tandem/attribution`, directory `0700`, files `0600` |
 | Git notes others may read | Line fingerprints, model, session ID and time: no code and no paths of your machine |
 
 ## Fixed in the review (November 2026)
@@ -58,7 +58,7 @@ everything claude-pair can, so claude-pair does not defend against them.
    confirmation. Only `http`, `https`, `file` and `mailto` links are
    turned into Org links now.
 
-Each fix has a test (`test/claude-pair-security-tests.el`).
+Each fix has a test (`test/tandem-security-tests.el`).
 
 ## Accepted, and why
 
@@ -72,7 +72,7 @@ Each fix has a test (`test/claude-pair-security-tests.el`).
 - **The auto-accept review style** applies Claude's edits without asking:
   you choose it.
 - **Claude Code's own files** (transcripts and approved plans under
-  `~/.claude/`) are kept by Claude Code, not claude-pair.
+  `~/.claude/`) are kept by Claude Code, not tandem.
 
 ## Dependencies
 
@@ -83,19 +83,19 @@ The daemon depends on the MCP Go SDK and a few `golang.org/x` modules
 cd daemon && go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 ```
 
-In November 2026 it found nothing in claude-pair's code or its modules,
+In November 2026 it found nothing in tandem's code or its modules,
 but five bugs in the standard library of Go 1.26.1, the Go it was built
 with: GO-2026-6859, GO-2026-6617, GO-2026-6613 and GO-2026-6612 (crashes
 and desynchronisation in Go's HTTP server) and GO-2026-6809 (compromised
-intermediate certificates). claude-paird runs no HTTP server and makes no
+intermediate certificates). tandemd runs no HTTP server and makes no
 TLS connections, so none of them can be triggered in it; govulncheck
-reaches them through HTTP code in the MCP library that claude-paird never
+reaches them through HTTP code in the MCP library that tandemd never
 uses. Go 1.27.3 fixes four of them; GO-2026-6859 needs 1.27.4. Release
 binaries carry the standard library all the same, so they are built with
 a Go that has every fix: `make dist` refuses one older than 1.27.4, and
 the release workflow uses the newest Go. The scan also named
 GO-2026-5024 in `golang.org/x/sys/windows` (Windows only, in a function
-claude-paird never calls); the module is updated to a version with the
+tandemd never calls); the module is updated to a version with the
 fix (0.48.0), so building needs Go 1.26 or later.
 
 ## Reporting a problem

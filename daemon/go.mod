@@ -1,4 +1,4 @@
-module github.com/victory/claude-pair/daemon
+module github.com/victory/tandem/daemon
 
 go 1.26.0
 

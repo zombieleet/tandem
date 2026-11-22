@@ -1,4 +1,4 @@
-// Package endpoint connects to claude-paird, on a Unix socket or, where
+// Package endpoint connects to tandemd, on a Unix socket or, where
 // Emacs has none (Windows), on a local TCP port.
 //
 // A TCP daemon writes an endpoint file where the socket would be: JSON with
@@ -40,7 +40,7 @@ func Read(path string) (Info, error) {
 		return info, err
 	}
 	if err := json.Unmarshal(data, &info); err != nil || info.Port <= 0 || info.Token == "" {
-		return info, fmt.Errorf("%s is not a claude-paird endpoint file", path)
+		return info, fmt.Errorf("%s is not a tandemd endpoint file", path)
 	}
 	return info, nil
 }

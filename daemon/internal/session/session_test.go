@@ -3,7 +3,7 @@ package session
 import (
 	"errors"
 	"fmt"
-	"github.com/victory/claude-pair/daemon/internal/testutil"
+	"github.com/victory/tandem/daemon/internal/testutil"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -250,10 +250,10 @@ func TestFirstStartUsesSessionIDAndSafeFlags(t *testing.T) {
 
 func TestHelperFlags(t *testing.T) {
 	s := New(Options{ID: "abc", Cwd: "/p", ClaudePath: "/c",
-		HelperCommand: []string{"/bin/claude-paird", "mcp", "--socket", "/run/d.sock", "--session", "abc"}})
+		HelperCommand: []string{"/bin/tandemd", "mcp", "--socket", "/run/d.sock", "--session", "abc"}})
 	args := strings.Join(s.Args(false), " ")
 	for _, want := range []string{
-		`--mcp-config {"mcpServers":{"emacs":{"args":["mcp","--socket","/run/d.sock","--session","abc"],"command":"/bin/claude-paird","timeout":86400000,"type":"stdio"}}}`,
+		`--mcp-config {"mcpServers":{"emacs":{"args":["mcp","--socket","/run/d.sock","--session","abc"],"command":"/bin/tandemd","timeout":86400000,"type":"stdio"}}}`,
 		"--permission-prompt-tool mcp__emacs__permission",
 		"--allowedTools mcp__emacs__edit_file,mcp__emacs__write_file,mcp__emacs__open_file,mcp__emacs__close_window,mcp__emacs__list_windows,mcp__emacs__diagnostics,mcp__emacs__xref,mcp__emacs__imenu,mcp__emacs__selection",
 		"--append-system-prompt " + EditingPrompt,
@@ -495,7 +495,7 @@ func TestToolTitles(t *testing.T) {
 
 func TestInstructionsGoIntoTheSystemPrompt(t *testing.T) {
 	s := New(Options{ID: "abc", Cwd: "/p", ClaudePath: "/c", Instructions: "  Use simple English.  ",
-		HelperCommand: []string{"/bin/claude-paird", "mcp"}})
+		HelperCommand: []string{"/bin/tandemd", "mcp"}})
 	args := s.Args(false)
 	var prompt string
 	for i, a := range args {

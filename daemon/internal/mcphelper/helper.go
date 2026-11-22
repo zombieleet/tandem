@@ -1,4 +1,4 @@
-// Package mcphelper is "claude-paird mcp": an MCP server that Claude Code
+// Package mcphelper is "tandemd mcp": an MCP server that Claude Code
 // starts over stdio. It answers Claude Code's permission prompts, and later
 // Claude's edit and window tools, by relaying each call to the daemon over
 // its socket.
@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/victory/claude-pair/daemon/internal/endpoint"
-	"github.com/victory/claude-pair/daemon/internal/protocol"
-	"github.com/victory/claude-pair/daemon/internal/rpc"
-	"github.com/victory/claude-pair/daemon/internal/version"
+	"github.com/victory/tandem/daemon/internal/endpoint"
+	"github.com/victory/tandem/daemon/internal/protocol"
+	"github.com/victory/tandem/daemon/internal/rpc"
+	"github.com/victory/tandem/daemon/internal/version"
 )
 
 // ServerName and PermissionTool make up the permission tool's full name,
@@ -119,7 +119,7 @@ type editResult struct {
 func Run(ctx context.Context, socketPath, sessionID string, log *slog.Logger) error {
 	nc, token, err := endpoint.Dial(socketPath, 10*time.Second)
 	if err != nil {
-		return fmt.Errorf("cannot reach claude-paird at %s: %w", socketPath, err)
+		return fmt.Errorf("cannot reach tandemd at %s: %w", socketPath, err)
 	}
 	refuse := func(context.Context, *rpc.Conn, string, json.RawMessage) (any, error) {
 		return nil, rpc.Errorf(protocol.MethodNotFound, "the MCP helper takes no requests")
@@ -130,17 +130,17 @@ func Run(ctx context.Context, socketPath, sessionID string, log *slog.Logger) er
 
 	if _, err := conn.Call(ctx, "initialize", map[string]any{
 		"protocolVersion": protocol.Version,
-		"clientInfo":      map[string]string{"name": "claude-paird-mcp", "version": version.Version},
+		"clientInfo":      map[string]string{"name": "tandemd-mcp", "version": version.Version},
 		"capabilities":    map[string]any{"role": "mcp-helper", "sessionId": sessionID},
 		"token":           token,
 	}); err != nil {
-		return fmt.Errorf("claude-paird refused the helper: %w", err)
+		return fmt.Errorf("tandemd refused the helper: %w", err)
 	}
 
 	server := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: version.Version}, nil)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        PermissionTool,
-		Description: "Internal to claude-pair: answers Claude Code's permission prompts. Never call it yourself.",
+		Description: "Internal to tandem: answers Claude Code's permission prompts. Never call it yourself.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in map[string]any) (*mcp.CallToolResult, any, error) {
 		answer, err := conn.Call(ctx, "helper/permission", map[string]any{
 			"sessionId": sessionID,
@@ -152,7 +152,7 @@ func Run(ctx context.Context, socketPath, sessionID string, log *slog.Logger) er
 			log.Warn("permission request failed", "error", err)
 			answer, _ = json.Marshal(map[string]string{
 				"behavior": "deny",
-				"message":  "claude-pair could not ask the user (" + err.Error() + "), so it denied this.",
+				"message":  "tandem could not ask the user (" + err.Error() + "), so it denied this.",
 			})
 		}
 		// Claude Code reads exactly one text block holding the decision.
@@ -166,7 +166,7 @@ func Run(ctx context.Context, socketPath, sessionID string, log *slog.Logger) er
 			err = json.Unmarshal(raw, &r)
 		}
 		if err != nil {
-			r = editResult{Text: "The edit was not made: claude-pair could not reach Emacs (" + err.Error() + ").", IsError: true}
+			r = editResult{Text: "The edit was not made: tandem could not reach Emacs (" + err.Error() + ").", IsError: true}
 		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: r.Text}}, IsError: r.IsError}, nil, nil
 	}
@@ -195,7 +195,7 @@ func Run(ctx context.Context, socketPath, sessionID string, log *slog.Logger) er
 			err = json.Unmarshal(raw, &r)
 		}
 		if err != nil {
-			r = editResult{Text: "claude-pair could not reach Emacs (" + err.Error() + ").", IsError: true}
+			r = editResult{Text: "tandem could not reach Emacs (" + err.Error() + ").", IsError: true}
 		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: r.Text}}, IsError: r.IsError}, nil, nil
 	}

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/victory/claude-pair/daemon/internal/protocol"
+	"github.com/victory/tandem/daemon/internal/protocol"
 )
 
 func mcpPrompt(t *testing.T, tool string, args map[string]any) string {
@@ -78,7 +78,7 @@ func TestOpenFileOutsideTheProjectIsRefused(t *testing.T) {
 	id := createSessionIn(t, c, project(t))
 	prompt(t, c, id, mcpPrompt(t, "open_file", map[string]any{"path": "/etc/passwd"}))
 	got := turnText(c.untilIdle(id)) // fails on any tool/call notification
-	if !strings.Contains(got, "claude-pair only shows files inside the project") || !strings.HasSuffix(got, "(error)") {
+	if !strings.Contains(got, "tandem only shows files inside the project") || !strings.HasSuffix(got, "(error)") {
 		t.Fatalf("text %q", got)
 	}
 	prompt(t, c, id, mcpPrompt(t, "open_file", map[string]any{"path": "../x.txt"}))
@@ -159,7 +159,7 @@ func TestReadingToolsAreRelayedWithTheirPaths(t *testing.T) {
 	}
 	wantOK(t, answerTool(c, p["requestId"].(string), "geo.py line 3", false))
 	got := turnText(c.untilIdle(id))
-	if !strings.Contains(got, "imenu result: claude-pair only reads files inside the project") {
+	if !strings.Contains(got, "imenu result: tandem only reads files inside the project") {
 		t.Fatalf("text %q", got)
 	}
 	for _, u := range []string{"xref result: a.txt:1: def area", "diagnostics result: no diagnostics", "selection result: geo.py line 3"} {

@@ -1,4 +1,4 @@
-// Package protocol holds the claude-pair protocol's constants and message types.
+// Package protocol holds the tandem protocol's constants and message types.
 // See protocol/PROTOCOL.md.
 package protocol
 
@@ -10,7 +10,7 @@ import (
 // Version is the protocol version this daemon speaks.
 const Version = "0.17.0"
 
-// JSON-RPC error codes, standard and claude-pair specific.
+// JSON-RPC error codes, standard and tandem specific.
 const (
 	ParseError           = -32700
 	InvalidRequest       = -32600

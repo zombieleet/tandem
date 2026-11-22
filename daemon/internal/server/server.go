@@ -1,4 +1,4 @@
-// Package server is the daemon: a Unix socket server speaking the claude-pair protocol.
+// Package server is the daemon: a Unix socket server speaking the tandem protocol.
 package server
 
 import (
@@ -22,19 +22,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/victory/claude-pair/daemon/internal/endpoint"
-	"github.com/victory/claude-pair/daemon/internal/history"
-	"github.com/victory/claude-pair/daemon/internal/paths"
-	"github.com/victory/claude-pair/daemon/internal/protocol"
-	"github.com/victory/claude-pair/daemon/internal/rpc"
-	"github.com/victory/claude-pair/daemon/internal/session"
+	"github.com/victory/tandem/daemon/internal/endpoint"
+	"github.com/victory/tandem/daemon/internal/history"
+	"github.com/victory/tandem/daemon/internal/paths"
+	"github.com/victory/tandem/daemon/internal/protocol"
+	"github.com/victory/tandem/daemon/internal/rpc"
+	"github.com/victory/tandem/daemon/internal/session"
 )
 
 // AlreadyRunningError means another daemon answers on the socket.
 type AlreadyRunningError struct{ Path string }
 
 func (e *AlreadyRunningError) Error() string {
-	return "another claude-paird is already listening on " + e.Path
+	return "another tandemd is already listening on " + e.Path
 }
 
 // UnsafeDirError means the socket's directory could let other users reach the daemon.
@@ -49,8 +49,8 @@ type Options struct {
 	IdleTimeout time.Duration
 	Version     string
 	Log         *slog.Logger
-	// HelperPath is the claude-paird executable that Claude Code starts as
-	// "claude-paird mcp". It defaults to this program.
+	// HelperPath is the tandemd executable that Claude Code starts as
+	// "tandemd mcp". It defaults to this program.
 	HelperPath string
 	// TCP listens on a local TCP port, written with a token to an endpoint
 	// file at SocketPath, instead of on a Unix socket there.
@@ -227,7 +227,7 @@ func (d *Daemon) Stop(reason string) {
 		}
 		d.mu.Unlock()
 		for _, s := range sessions {
-			d.withdrawPermissions(s.ID(), "claude-paird is stopping.")
+			d.withdrawPermissions(s.ID(), "tandemd is stopping.")
 		}
 		d.mu.Lock()
 		d.sessions = map[string]*sessionEntry{}
@@ -484,7 +484,7 @@ func (d *Daemon) initialize(c *client, params json.RawMessage) (any, error) {
 	d.opts.Log.Info("client initialized", "client", c.conn.ID, "name", c.name.Load())
 	return protocol.InitializeResult{
 		ProtocolVersion: protocol.Version,
-		ServerInfo:      protocol.ServerInfo{Name: "claude-paird", Version: d.opts.Version},
+		ServerInfo:      protocol.ServerInfo{Name: "tandemd", Version: d.opts.Version},
 		PID:             os.Getpid(),
 		Capabilities:    map[string]any{},
 	}, nil
@@ -787,7 +787,7 @@ func newSessionID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-// defaultHelperPath is the executable Claude Code runs as "claude-paird mcp".
+// defaultHelperPath is the executable Claude Code runs as "tandemd mcp".
 // On Linux it is /proc/PID/exe, which stays this daemon's own binary even
 // after an upgrade or a rebuild replaces the file, so a helper always speaks
 // the daemon's protocol. Elsewhere it is the executable's path.

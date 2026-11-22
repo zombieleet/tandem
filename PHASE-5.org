@@ -1,7 +1,7 @@
-#+TITLE: claude-pair · Phase 5 · Release
+#+TITLE: tandem · Phase 5 · Release
 #+STARTUP: overview
 
-Phase 5 makes claude-pair ready for other people. Each milestone has
+Phase 5 makes tandem ready for other people. Each milestone has
 automatic checks, a check by you, and its own branch; a commit follows
 your "Mx passed". Anything that leaves this machine (a GitHub repository,
 a push, a MELPA request) waits for your explicit go-ahead.
@@ -25,9 +25,9 @@ Windows, the first public release).
   Markdown links became =elisp:= / =shell:= Org links: now only http,
   https, file and mailto
 - [X] Known vulnerabilities (=govulncheck=, run by you): none in
-  claude-pair or its modules; five in the standard library of Go 1.26.1
+  tandem or its modules; five in the standard library of Go 1.26.1
   (HTTP server crashes and desynchronisation, compromised intermediate
-  certificates), not reachable in claude-paird, which runs no HTTP server
+  certificates), not reachable in tandemd, which runs no HTTP server
   and no TLS. With your Go 1.27.3 one is left (GO-2026-6859, fixed in
   1.27.4), plus GO-2026-5024 in =golang.org/x/sys/windows=, never
   called: updated to 0.48.0 anyway (Go 1.26 or later to build). Release
@@ -42,9 +42,29 @@ Windows, the first public release).
 - [X] Read =SECURITY.md=: anything you would trust less, or more?
 - [X] Which module the scan meant (=-show verbose=): =golang.org/x/sys=
 
-* TODO M2 · The name [0/2]
-- [ ] Anthropic's trademark guidelines for "Claude" in a project's name
-- [ ] Keep "claude-pair" or rename, your choice
+* DONE M2 · The name [2/2]
+- [X] Anthropic's trademark guidelines (effective 1 Aug 2024): "You may
+  only use our trademarks as specifically permitted by us and only in
+  materials we approve beforehand"; no use that implies sponsorship,
+  endorsement or affiliation. A name built on "Claude" needs their
+  approval; saying what it works with ("for Claude Code") is description
+- [X] Renamed to *tandem* (your choice); the name is free on MELPA, GNU
+  ELPA and NonGNU ELPA. =claude-pair-…= is now =tandem-…=, =claude-paird=
+  is =tandemd=, the Go module =github.com/victory/tandem/daemon=; the
+  README says tandem is independent and not Anthropic's, and how to
+  upgrade. Kept working: Claude's lines move from =~/.cache/claude-pair=
+  to =~/.cache/tandem= by themselves, git notes under
+  =refs/notes/claude-pair= are still read. Your Doom config now loads
+  =tandem= (=C-c c P= as before). The phase 1-4 checklists keep the old
+  name as history; the checkout folder keeps its name too
+** Auto
+- [X] ERT: the old store moved once, and only when the new one is not
+  there; notes under the old ref read. 258 tests, all 262 with your Doom
+  packages; Go tests; =make check= clean
+** Visual gate (your turn)
+- [X] Restart Emacs: =C-c c P= opens a chat named =*tandem: badger*=;
+  Claude's coloured lines are still coloured
+- [X] =M-x tandem-chats=, =M-x tandem-resume=: your earlier chats are there
 
 * TODO M3 · Manual [0/2]
 - [ ] A Texinfo manual: install, use, every command and option, the

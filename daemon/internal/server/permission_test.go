@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/victory/claude-pair/daemon/internal/protocol"
+	"github.com/victory/tandem/daemon/internal/protocol"
 )
 
 // nextUpdate reads session updates until match accepts one.

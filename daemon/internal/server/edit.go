@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/victory/claude-pair/daemon/internal/protocol"
-	"github.com/victory/claude-pair/daemon/internal/rpc"
-	"github.com/victory/claude-pair/daemon/internal/session"
+	"github.com/victory/tandem/daemon/internal/protocol"
+	"github.com/victory/tandem/daemon/internal/rpc"
+	"github.com/victory/tandem/daemon/internal/session"
 )
 
 // An edit travels like this: Claude calls edit_file or write_file on the
@@ -81,7 +81,7 @@ func (d *Daemon) proposeEdit(ctx context.Context, c *client, params json.RawMess
 	asker := d.askerLocked(e)
 	d.mu.Unlock()
 	if e == nil {
-		return failed("The edit was not made: claude-pair has no such session.")
+		return failed("The edit was not made: tandem has no such session.")
 	}
 	path, err := insideProject(e.s.Cwd(), p.FilePath, "edits")
 	if err != nil {
@@ -371,7 +371,7 @@ func insideProject(cwd, path, verb string) (string, error) {
 	}
 	full := filepath.Join(existing, rest)
 	if rel, err := filepath.Rel(root, full); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return "", errors.New("claude-pair only " + verb + " files inside the project " + cwd + ", not " + clean)
+		return "", errors.New("tandem only " + verb + " files inside the project " + cwd + ", not " + clean)
 	}
 	return clean, nil
 }

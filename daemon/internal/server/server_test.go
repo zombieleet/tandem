@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/victory/claude-pair/daemon/internal/endpoint"
-	"github.com/victory/claude-pair/daemon/internal/framing"
-	"github.com/victory/claude-pair/daemon/internal/protocol"
+	"github.com/victory/tandem/daemon/internal/endpoint"
+	"github.com/victory/tandem/daemon/internal/framing"
+	"github.com/victory/tandem/daemon/internal/protocol"
 )
 
 // privateDir makes a fresh 0700 directory under the system temp dir. It avoids
@@ -223,7 +223,7 @@ func TestInitializeThenStatus(t *testing.T) {
 	wantOK(t, init)
 	var result protocol.InitializeResult
 	json.Unmarshal(init.Result, &result)
-	if result.ProtocolVersion != protocol.Version || result.ServerInfo.Name != "claude-paird" ||
+	if result.ProtocolVersion != protocol.Version || result.ServerInfo.Name != "tandemd" ||
 		result.ServerInfo.Version != "9.9.9-test" || result.PID != os.Getpid() || result.Capabilities == nil {
 		t.Fatalf("initialize result %s", init.Result)
 	}

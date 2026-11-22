@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/victory/claude-pair/daemon/internal/mcphelper"
+	"github.com/victory/tandem/daemon/internal/mcphelper"
 )
 
 // Update is one session/update payload. "kind" says which fields it carries;
@@ -38,7 +38,7 @@ type Options struct {
 	// Instructions are the user's standing instructions for Claude, such as
 	// how to write; they go into the system prompt of every turn.
 	Instructions string
-	// HelperCommand starts the MCP helper ("claude-paird mcp ..."). When
+	// HelperCommand starts the MCP helper ("tandemd mcp ..."). When
 	// set, permission prompts go to its permission tool; when empty,
 	// anything that would ask is denied.
 	HelperCommand []string
@@ -67,8 +67,8 @@ var (
 	ErrClosed = errors.New("the session is closed")
 )
 
-// EditingPrompt tells Claude how files change in claude-pair.
-const EditingPrompt = "You are running inside claude-pair, which connects you to the user's Emacs. " +
+// EditingPrompt tells Claude how files change in tandem.
+const EditingPrompt = "You are running inside tandem, which connects you to the user's Emacs. " +
 	"Change files only with " + mcphelper.EditToolName + " and create or overwrite them only with " +
 	mcphelper.WriteToolName + "; the built-in Edit, Write and NotebookEdit tools are turned off. " +
 	"The user reviews every edit in Emacs, where the file may have unsaved changes, so old_string must " +
@@ -399,7 +399,7 @@ func (s *Session) Args(resume bool) []string {
 	return append(args, "--session-id", s.opts.ID)
 }
 
-// systemPrompt is what claude-pair adds to Claude's system prompt: how
+// systemPrompt is what tandem adds to Claude's system prompt: how
 // files change here, when Emacs is reachable, then the user's instructions.
 func (s *Session) systemPrompt() string {
 	var parts []string

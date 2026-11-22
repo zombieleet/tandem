@@ -8,10 +8,10 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/victory/claude-pair/daemon/internal/mcphelper"
-	"github.com/victory/claude-pair/daemon/internal/protocol"
-	"github.com/victory/claude-pair/daemon/internal/rpc"
-	"github.com/victory/claude-pair/daemon/internal/session"
+	"github.com/victory/tandem/daemon/internal/mcphelper"
+	"github.com/victory/tandem/daemon/internal/protocol"
+	"github.com/victory/tandem/daemon/internal/rpc"
+	"github.com/victory/tandem/daemon/internal/session"
 )
 
 // A permission request travels like this: Claude Code calls the MCP
@@ -66,10 +66,10 @@ func (d *Daemon) askPermission(ctx context.Context, c *client, params json.RawMe
 	asker := d.askerLocked(e)
 	d.mu.Unlock()
 	if e == nil {
-		return deny("claude-pair has no such session, so it denied this."), nil
+		return deny("tandem has no such session, so it denied this."), nil
 	}
 	if asker == nil {
-		return deny("No Emacs is connected to answer this permission prompt, so claude-pair denied it."), nil
+		return deny("No Emacs is connected to answer this permission prompt, so tandem denied it."), nil
 	}
 	// The question comes through the helper, Claude's words through its
 	// output: wait until the output has reached the tool call, so Emacs

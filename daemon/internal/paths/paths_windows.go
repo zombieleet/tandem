@@ -7,13 +7,13 @@ import (
 	"path/filepath"
 )
 
-// DefaultRuntimeDir is %LOCALAPPDATA%\claude-pair, private to the user.
+// DefaultRuntimeDir is %LOCALAPPDATA%\tandem, private to the user.
 func DefaultRuntimeDir() string {
 	base := os.Getenv("LOCALAPPDATA")
 	if base == "" {
 		base = os.TempDir()
 	}
-	return filepath.Join(base, "claude-pair")
+	return filepath.Join(base, "tandem")
 }
 
 // DefaultSocketPath is the endpoint file: Emacs on Windows has no Unix

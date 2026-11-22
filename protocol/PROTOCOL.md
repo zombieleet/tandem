@@ -1,14 +1,14 @@
-# claude-pair protocol
+# tandem protocol
 
 Version **0.17.0**. This document is the contract between the Emacs client
-(`lisp/`) and the daemon `claude-paird` (`daemon/`). Either side can be
+(`lisp/`) and the daemon `tandemd` (`daemon/`). Either side can be
 replaced as long as it follows this document.
 
 ## Transport
 
 - **POSIX:** a Unix domain socket. The default path is
-  `$XDG_RUNTIME_DIR/claude-pair/daemon.sock`. When `XDG_RUNTIME_DIR` is unset
-  or not absolute, it is `<tmpdir>/claude-pair-<uid>/daemon.sock`, where
+  `$XDG_RUNTIME_DIR/tandem/daemon.sock`. When `XDG_RUNTIME_DIR` is unset
+  or not absolute, it is `<tmpdir>/tandem-<uid>/daemon.sock`, where
   `<tmpdir>` is `$TMPDIR` or `/tmp`.
 - The directory holding the socket must belong to the user and must not be
   readable, writable or searchable by anyone else (mode `0700`). The daemon
@@ -19,7 +19,7 @@ replaced as long as it follows this document.
   `--tcp` anywhere): the daemon listens on a free port of `127.0.0.1` only,
   and writes an endpoint file where the socket would be:
   `{"port": N, "token": "<64 hex digits>", "pid": N}`, mode `0600`. On
-  Windows the default is `%LOCALAPPDATA%\claude-pair\daemon.json`, in a
+  Windows the default is `%LOCALAPPDATA%\tandem\daemon.json`, in a
   directory only the user can open. A client tells the two apart by what is
   at the path: a socket, or a regular file. Over TCP a client sends the
   token in `initialize`, and in `shutdown` sent before it; the daemon
@@ -59,7 +59,7 @@ request the receiver is still working on.
 ## Lifecycle
 
 1. The client connects to the socket. If nothing listens there, it starts the
-   daemon with `claude-paird --detach --socket <path>`, which returns once the
+   daemon with `tandemd --detach --socket <path>`, which returns once the
    socket accepts connections.
 2. The client sends `initialize`. Every other request before a successful
    `initialize` fails with `-32002`, except `shutdown`, so a client can stop a
@@ -89,7 +89,7 @@ Result:
 | Field | Type |
 |---|---|
 | `protocolVersion` | string |
-| `serverInfo` | `{name: "claude-paird", version}` |
+| `serverInfo` | `{name: "tandemd", version}` |
 | `pid` | number |
 | `capabilities` | object (empty in 0.1) |
 
@@ -117,7 +117,7 @@ No params. Result:
 Params: `cwd` (absolute path of an existing directory, the project root),
 `claudePath` (absolute path of the `claude` command), optional `model`,
 optional `instructions`: the user's standing instructions, added to the
-system prompt of every turn, after claude-pair's own, as "The user's
+system prompt of every turn, after tandem's own, as "The user's
 instructions for every answer: …";
 optional `env`: an object from variable names to a string, which sets the
 variable for this session's `claude`, or `null`, which removes it. Every
@@ -225,7 +225,7 @@ the daemon first writes a `set_permission_mode` control request. In plan
 mode Claude only reads and plans; it asks for `ExitPlanMode`, a permission
 question like any other. Claude Code 2.1 sends that question with an empty
 input and expects the plan in a file its Write tool cannot write here, so
-claude-pair's system prompt asks Claude to write the whole plan in its
+tandem's system prompt asks Claude to write the whole plan in its
 reply first; a client shows that text for the user to edit. Allowing
 `ExitPlanMode` with `updatedInput: {plan}` makes that plan the one Claude
 follows; Claude Code then leaves plan mode by itself.
@@ -237,17 +237,17 @@ claude -p --input-format stream-json --output-format stream-json --verbose
        --include-partial-messages --permission-mode default
        --disallowedTools Edit,Write,NotebookEdit
        --mcp-config '{"mcpServers":{"emacs":{"type":"stdio",
-           "command":"<claude-paird>","args":["mcp","--socket",S,"--session",ID],
+           "command":"<tandemd>","args":["mcp","--socket",S,"--session",ID],
            "timeout":86400000}}}'
        --permission-prompt-tool mcp__emacs__permission
        --allowedTools mcp__emacs__edit_file,mcp__emacs__write_file,
                       mcp__emacs__open_file,mcp__emacs__close_window,mcp__emacs__list_windows
-       --append-system-prompt "<how files change and windows work in claude-pair,
+       --append-system-prompt "<how files change and windows work in tandem,
                                then the user's instructions>"
        [--model M] (--session-id ID | --resume ID)
 ```
 
-`<claude-paird>` is `/proc/<daemon pid>/exe` on Linux, so a helper is always
+`<tandemd>` is `/proc/<daemon pid>/exe` on Linux, so a helper is always
 the daemon's own binary even after an upgrade replaced the file, and the
 executable's path elsewhere.
 
@@ -293,7 +293,7 @@ Events from subagents are left out; the subagent's own tool call shows instead.
 ## Permission questions
 
 Claude Code asks before running a tool that needs approval. It does so by
-calling the permission tool of the MCP helper, `claude-paird mcp`, which it
+calling the permission tool of the MCP helper, `tandemd mcp`, which it
 starts from `--mcp-config`. The helper connects to the daemon's socket and
 sends `initialize` with `capabilities: {role: "mcp-helper", sessionId}`.
 Helpers do not count as clients, neither in `daemon/status` nor for the idle

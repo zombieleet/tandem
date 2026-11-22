@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/victory/claude-pair/daemon/internal/protocol"
+	"github.com/victory/tandem/daemon/internal/protocol"
 )
 
 func createSessionIn(t *testing.T, c *testClient, cwd string) string {
@@ -147,7 +147,7 @@ func TestEditsOutsideTheProjectAreRefused(t *testing.T) {
 	for _, file := range files {
 		prompt(t, c, id, editPrompt(t, map[string]any{"file": file, "old": "a", "new": "b"}))
 		updates := c.untilIdle(id)
-		if got := turnText(updates); !strings.Contains(got, "claude-pair only edits files inside the project") {
+		if got := turnText(updates); !strings.Contains(got, "tandem only edits files inside the project") {
 			t.Fatalf("%s: text %q", file, got)
 		}
 		for _, u := range updates {

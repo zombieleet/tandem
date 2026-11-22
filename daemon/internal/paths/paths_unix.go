@@ -1,7 +1,7 @@
 //go:build !windows
 
 // Package paths says where the daemon's socket lives.
-// Keep it in step with claude-pair-rpc-default-socket-path in lisp/claude-pair-rpc.el.
+// Keep it in step with tandem-rpc-default-socket-path in lisp/tandem-rpc.el.
 package paths
 
 import (
@@ -10,13 +10,13 @@ import (
 	"path/filepath"
 )
 
-// DefaultRuntimeDir is $XDG_RUNTIME_DIR/claude-pair, or <tmpdir>/claude-pair-<uid>
+// DefaultRuntimeDir is $XDG_RUNTIME_DIR/tandem, or <tmpdir>/tandem-<uid>
 // when XDG_RUNTIME_DIR is unset or not absolute.
 func DefaultRuntimeDir() string {
 	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" && filepath.IsAbs(xdg) {
-		return filepath.Join(xdg, "claude-pair")
+		return filepath.Join(xdg, "tandem")
 	}
-	return filepath.Join(os.TempDir(), fmt.Sprintf("claude-pair-%d", os.Getuid()))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("tandem-%d", os.Getuid()))
 }
 
 // DefaultSocketPath is daemon.sock inside DefaultRuntimeDir.
