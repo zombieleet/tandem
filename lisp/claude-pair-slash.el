@@ -45,6 +45,15 @@
 (require 'seq)
 (require 'subr-x)
 
+(defcustom claude-pair-slash-popup t
+  "Non-nil to list the slash commands as soon as you type / to start a message."
+  :type 'boolean
+  :group 'claude-pair)
+
+(defvar company-backends)
+(defvar company-mode)
+(declare-function company-manual-begin "company")
+
 (defvar-local claude-pair-slash--commands nil
   "The slash commands Claude Code offers in this chat, as plists.")
 
@@ -154,9 +163,33 @@ keep typing.  Nothing happens without a connection to the daemon."
        (call-interactively #'claude-pair-resume)
        t))))
 
+(defun claude-pair-slash--company-first ()
+  "Let claude-pair's completion go first with Company in this chat.
+Company asks its backends in order and keeps the first that answers;
+the words of your buffers would otherwise answer before the commands."
+  (when (and (boundp 'company-backends)
+             (not (eq (car company-backends) 'company-capf)))
+    (setq-local company-backends (cons 'company-capf (remq 'company-capf company-backends)))))
+
+(defun claude-pair-slash--popup ()
+  "List the slash commands as you type / at the start of a message."
+  (when (and claude-pair-slash-popup
+             (eq last-command-event ?/)
+             (>= (point) claude-pair-chat--input)
+             (string-match-p "\\`[ \t\n]*/\\'"
+                             (buffer-substring-no-properties claude-pair-chat--input (point))))
+    (unless (or claude-pair-slash--commands claude-pair-slash--loading)
+      (ignore-errors (claude-pair-slash-refresh)))
+    (if (bound-and-true-p company-mode)
+        (progn (claude-pair-slash--company-first)
+               (company-manual-begin))
+      (completion-at-point))))
+
 (defun claude-pair-slash--setup ()
   "Set up slash commands in a chat buffer."
-  (add-hook 'completion-at-point-functions #'claude-pair-slash-capf nil t))
+  (add-hook 'completion-at-point-functions #'claude-pair-slash-capf nil t)
+  (add-hook 'post-self-insert-hook #'claude-pair-slash--popup nil t)
+  (claude-pair-slash--company-first))
 
 (add-hook 'claude-pair-chat-mode-hook #'claude-pair-slash--setup)
 (add-hook 'claude-pair-chat-send-functions #'claude-pair-slash--send)

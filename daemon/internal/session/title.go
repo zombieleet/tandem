@@ -47,6 +47,9 @@ func ToolTitle(name string, input map[string]any, cwd string) string {
 		title := "Show " + relative(str("path"), cwd)
 		if line, ok := input["line"].(float64); ok && line > 0 {
 			title += fmt.Sprintf(":%d", int(line))
+			if end, ok := input["endLine"].(float64); ok && end > line {
+				title += fmt.Sprintf("-%d", int(end))
+			}
 		}
 		return title
 	case "mcp__emacs__close_window":

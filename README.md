@@ -417,8 +417,9 @@ taken back.
 
 ## Slash commands
 
-Type `/` at the start of a message and complete a command with
-`completion-at-point` (`C-M-i`, or as you type with Corfu or Company).
+Type `/` at the start of a message and the commands are listed at once
+(with Company, or `completion-at-point` otherwise;
+`claude-pair-slash-popup` turns that off). Keep typing to narrow them.
 You get Claude Code's own commands (`/compact`, `/context`, `/usage`,
 `/model`, `/init` …), your commands in `.claude/commands/` and
 `~/.claude/commands/`, skills and plugins, each with its description.
@@ -473,6 +474,15 @@ tools only read, so they never ask you:
 
 A file Claude asks about is opened if it is not, with unsafe local
 variables ignored, so its mode and checker can run.
+
+When Claude shows you a place, such as where something is defined, those
+lines are highlighted until you move out of them, change them, or Claude
+shows something else. When an xref lookup finds several places, such as
+every call of a function, `M-g n` and `M-g p` (`next-error`,
+`previous-error`) step through them, each highlighted; if Claude showed
+one of them, stepping goes on from there. `M-x claude-pair-locations`
+lists them. With `repeat-mode` on, after `M-g n` plain `n` and `p` keep
+stepping.
 
 ## Permission questions
 

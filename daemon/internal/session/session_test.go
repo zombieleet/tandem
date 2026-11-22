@@ -460,6 +460,7 @@ func TestToolTitles(t *testing.T) {
 		{"mcp__emacs__open_file", map[string]any{"path": "src/a.go"}, "Show src/a.go"},
 		{"mcp__emacs__close_window", map[string]any{"window": 3.0}, "Close window 3"},
 		{"mcp__emacs__list_windows", map[string]any{}, "List windows"},
+		{"mcp__emacs__open_file", map[string]any{"path": "/work/proj/src/a.go", "line": 12.0, "endLine": 20.0}, "Show src/a.go:12-20"},
 		{"mcp__emacs__diagnostics", map[string]any{"path": "/work/proj/src/a.go"}, "Diagnostics src/a.go"},
 		{"mcp__emacs__diagnostics", map[string]any{}, "Diagnostics of open files"},
 		{"mcp__emacs__xref", map[string]any{"symbol": "area", "kind": "references"}, "Xref references of area"},

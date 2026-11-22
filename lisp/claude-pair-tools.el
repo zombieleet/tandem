@@ -39,6 +39,7 @@
 
 ;;; Code:
 
+(require 'claude-pair-chat)
 (require 'claude-pair-layout)
 (require 'claude-pair-mention)
 (require 'imenu)
@@ -145,8 +146,82 @@ File names are relative to ROOT."
       (goto-char (match-beginning 0))
       t)))
 
-(defun claude-pair-tools-xref (args _session root)
-  "Answer Claude's xref call with ARGS in project ROOT."
+;;;; Stepping through the places xref found
+
+(defvar compilation-current-error)
+
+(defvar claude-pair-tools--locations-buffer "*claude-pair locations*"
+  "Name of the buffer listing the places of Claude's last xref lookup.")
+
+(defun claude-pair-tools--locations (session root title places)
+  "List PLACES, Claude's xref result TITLE in ROOT, for `next-error'.
+PLACES are (FILE LINE SUMMARY), FILE relative to ROOT.  \\[next-error] and
+\\[previous-error] then step through them, each highlighted.  SESSION's
+chat says so."
+  (require 'grep)
+  (let ((buffer (get-buffer-create claude-pair-tools--locations-buffer)))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (setq default-directory (file-name-as-directory root))
+        (insert title "\n\n")
+        (dolist (place places)
+          (insert (format "%s:%d:%s\n" (nth 0 place) (nth 1 place) (nth 2 place))))
+        (grep-mode)
+        (goto-char (point-min))
+        (setq compilation-current-error nil)))
+    (setq next-error-last-buffer buffer)
+    (when-let* ((chat (gethash session claude-pair-chat--buffers)))
+      (with-current-buffer chat
+        (claude-pair-chat--enqueue
+         (cons 'notice (substitute-command-keys
+                        (format (if (bound-and-true-p repeat-mode)
+                                    "%d places: \\[next-error] goes to the next, then n and p step through them; \
+M-x claude-pair-locations lists them."
+                                  "%d places: \\[next-error] and \\[previous-error] step through them, \
+M-x claude-pair-locations lists them.")
+                                (length places)))))))
+    buffer))
+
+(defun claude-pair-tools--shown (buffer line _last)
+  "Step on from the place Claude showed, if it is one of those listed.
+BUFFER is shown at LINE."
+  (when-let* ((locations (get-buffer claude-pair-tools--locations-buffer))
+              (file (buffer-file-name buffer)))
+    (with-current-buffer locations
+      (save-excursion
+        (goto-char (point-min))
+        (forward-line 2)
+        (catch 'found
+          (while (not (eobp))
+            (when (looking-at "\\(.+\\):\\([0-9]+\\):")
+              (when (and (= (string-to-number (match-string 2)) line)
+                         (file-equal-p (expand-file-name (match-string 1)) file))
+                (setq compilation-current-error (point-marker))
+                (setq next-error-last-buffer locations)
+                (throw 'found t)))
+            (forward-line 1)))))))
+
+(defun claude-pair-tools--after-next-error ()
+  "Highlight the place `next-error' went to, if it is one of Claude's."
+  (when (and next-error-last-buffer
+             (equal (buffer-name next-error-last-buffer) claude-pair-tools--locations-buffer))
+    (let ((line (line-number-at-pos)))
+      (claude-pair-layout-highlight (current-buffer) line line))))
+
+;;;###autoload
+(defun claude-pair-locations ()
+  "Show the places of Claude's last xref lookup."
+  (interactive)
+  (if-let* ((buffer (get-buffer claude-pair-tools--locations-buffer)))
+      (pop-to-buffer buffer)
+    (user-error "Claude has looked nothing up yet")))
+
+(add-hook 'claude-pair-layout-shown-functions #'claude-pair-tools--shown)
+(add-hook 'next-error-hook #'claude-pair-tools--after-next-error)
+
+(defun claude-pair-tools-xref (args session root)
+  "Answer Claude's xref call with ARGS for SESSION in project ROOT."
   (let* ((symbol (string-trim (or (plist-get args :symbol) "")))
          (kind (if (equal (plist-get args :kind) "references") "references" "definitions"))
          (buffer (claude-pair-tools--buffer (plist-get args :path))))
@@ -169,17 +244,26 @@ File names are relative to ROOT."
                    (items (if (equal kind "references")
                               (xref-backend-references backend identifier)
                             (xref-backend-definitions backend identifier)))
-                   (lines (mapcar (lambda (item)
-                                    (let ((location (xref-item-location item)))
-                                      (format "%s:%s: %s"
-                                              (claude-pair-tools--name (xref-location-group location) root)
-                                              (claude-pair-tools--line location)
-                                              (string-trim (substring-no-properties
-                                                            (xref-item-summary item))))))
-                                  items)))
+                   (places (delete-dups
+                                    (mapcar (lambda (item)
+                                              (let ((location (xref-item-location item)))
+                                                (list (claude-pair-tools--name (xref-location-group location) root)
+                                                      (claude-pair-tools--line location)
+                                                      (string-trim (substring-no-properties
+                                                                    (xref-item-summary item))))))
+                                            items)))
+                   (lines (mapcar (lambda (p) (format "%s:%s: %s" (nth 0 p) (nth 1 p) (nth 2 p))) places)))
+              ;; Several places: you can step through them.
+              (let ((numbered (seq-uniq (seq-filter (lambda (p) (numberp (nth 1 p))) places)
+                                        ;; One stop per line, however many uses are on it.
+                                        (lambda (a b) (and (equal (nth 0 a) (nth 0 b))
+                                                           (equal (nth 1 a) (nth 1 b)))))))
+                (when (cdr numbered)
+                  (claude-pair-tools--locations
+                   session root (format "%s of %s" (capitalize kind) symbol) numbered)))
               (cons (if lines
                         (concat (format "%s of %s (%s):\n" (capitalize kind) symbol backend)
-                                (string-join (claude-pair-tools--cap (delete-dups lines)) "\n"))
+                                (string-join (claude-pair-tools--cap lines) "\n"))
                       (format "No %s of %s found (%s)." kind symbol backend))
                     nil)))))))))
 

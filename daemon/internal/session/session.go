@@ -75,7 +75,7 @@ const EditingPrompt = "You are running inside claude-pair, which connects you to
 	"match what you last read. If the user rejects an edit, read their note and adjust instead of " +
 	"sending the same change again. Use absolute paths inside the project. " +
 	"To show the user a file or the lines you are talking about, call " + mcphelper.OpenFileToolName +
-	" with a line; do not open files only to read them. The user's Emacs keeps at most 5 windows; " +
+	" with a line, and endLine for a range such as a whole definition; do not open files only to read them. The user's Emacs keeps at most 5 windows; " +
 	mcphelper.ListWindowsToolName + " lists them and " + mcphelper.CloseWindowToolName +
 	" closes the ones you opened. Emacs also knows things grep does not. To find where a symbol is " +
 	"defined or where it is used, call " + mcphelper.XrefToolName + " first: when the user's Emacs runs a " +

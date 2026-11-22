@@ -192,6 +192,40 @@ work across worktrees and machines, then evil keys for others.
   "Org tasks and Embark", "Claude's lines in git notes", "Several chats
   at once" and "Commits with Magit": anything unclear or wrong?
 
+* After phase 4: your notes (22 Nov 2026)
+- [X] Where Claude takes you is highlighted: =open_file= takes an
+  =endLine=, so a definition shows as a highlighted range; the highlight
+  stays until you move out of it, change it, or Claude shows something
+  else
+- [X] Stepping through call sites: an xref lookup with several places
+  fills a grep list (=*claude-pair locations*=) that =M-g n= / =M-g p=
+  step through, each highlighted, one stop per line; when Claude opens
+  one of them, stepping goes on from it; the chat names the keys
+- [X] =/= lists the slash commands at once: on =/= at the start of a
+  message, Company opens (or =completion-at-point=); in the chat, Company
+  asks claude-pair's completion first, before the words of your buffers
+** Auto
+- [X] ERT (5): highlight of a range and of a line, removed when you move
+  out, replaced by the next; stepping with =next-error= from the place
+  Claude showed, with the chat's notice; one stop per line (Emacs Lisp
+  xref in a git repository); =/= opens completion only at the start;
+  Company first in the chat (with Company from your packages). Go: the
+  =Show a.go:12-20= title
+- [X] Fewer chords (you did not want M- and C- all the time; you chose
+  =repeat-mode= over evil or a menu): =repeat-mode= is on in your Doom
+  config, so after =M-g n= plain =n= and =p= keep stepping; the chat's
+  notice says so when =repeat-mode= is on
+** Live check run by Claude (22 Nov 2026, Haiku, about 2 cents)
+- [X] "Where is geo-area defined, and where is it called? Show me its
+  definition": Claude used xref; the chat said "4 places: …step through
+  them"; Claude showed =geo.el:3-5= and lines 3-5 were highlighted
+** Visual gate (your turn)
+- [X] Ask Claude where something is defined and to show it: the
+  definition is highlighted
+- [X] Ask where it is called: then =M-g n= once, and plain =n= / =p= step
+  through the places, highlighted
+- [X] In the chat, type =/=: the commands are listed at once
+
 * Later
 ** M5 · Remote daemon (postponed 22 Nov 2026, your choice)
 - Spike, by design only: no SSH host to test against here (no sshd,

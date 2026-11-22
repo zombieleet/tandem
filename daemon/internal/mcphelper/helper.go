@@ -61,6 +61,8 @@ func IsLayoutTool(name string) bool {
 type OpenFileArgs struct {
 	Path string `json:"path" jsonschema:"The file to show: an absolute path, or one relative to the project root"`
 	Line int    `json:"line,omitempty" jsonschema:"The line to show, counting from 1"`
+	// EndLine ends the range highlighted from Line, such as a whole function.
+	EndLine int `json:"endLine,omitempty" jsonschema:"The last line of the range to highlight, such as the end of a function; leave it out to highlight just line"`
 }
 
 // CloseWindowArgs are close_window's inputs.
@@ -203,11 +205,15 @@ func Run(ctx context.Context, socketPath, sessionID string, log *slog.Logger) er
 			"you are talking about. Emacs keeps at most 5 windows: below that it splits one, at the limit it " +
 			"reuses the window you used least recently. It never moves the user's cursor or takes over the " +
 			"window the user is working in. You do not need it to read a file yourself; use it to show the " +
-			"user something. Only files inside the project.",
+			"user something. The lines from line to endLine are highlighted, so the user sees where to look: " +
+			"to show where something is defined, give the whole definition. Only files inside the project.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, a OpenFileArgs) (*mcp.CallToolResult, any, error) {
 		args := map[string]any{"path": a.Path}
 		if a.Line > 0 {
 			args["line"] = a.Line
+			if a.EndLine >= a.Line {
+				args["endLine"] = a.EndLine
+			}
 		}
 		return emacs(ctx, "open_file", args)
 	})

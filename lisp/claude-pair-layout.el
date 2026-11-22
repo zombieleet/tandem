@@ -63,6 +63,57 @@ it reuses a window instead.  Windows you make yourself are not limited."
   :type 'natnum
   :group 'claude-pair)
 
+(defface claude-pair-shown
+  '((t :inherit highlight :extend t))
+  "Face of the lines Claude shows you, such as a definition."
+  :group 'claude-pair)
+
+(defvar claude-pair-layout-shown-functions nil
+  "Functions called when Claude shows a file at a line.
+Each gets the buffer and the first and last lines shown.")
+
+(defvar claude-pair-layout--shown nil
+  "The overlay on the lines Claude showed last, or nil.")
+
+(defun claude-pair-layout-unhighlight ()
+  "Remove the highlight from the lines Claude showed last."
+  (when claude-pair-layout--shown
+    (delete-overlay claude-pair-layout--shown)
+    (setq claude-pair-layout--shown nil))
+  (remove-hook 'post-command-hook #'claude-pair-layout--leave-shown))
+
+(defun claude-pair-layout--leave-shown ()
+  "Remove the highlight once you move out of the lines in their buffer."
+  (let ((overlay claude-pair-layout--shown))
+    (cond
+     ((not (and overlay (overlay-buffer overlay)))
+      (claude-pair-layout-unhighlight))
+     ((and (eq (current-buffer) (overlay-buffer overlay))
+           (not (and (>= (point) (overlay-start overlay)) (<= (point) (overlay-end overlay)))))
+      (claude-pair-layout-unhighlight)))))
+
+(defun claude-pair-layout-highlight (buffer first last)
+  "Highlight lines FIRST to LAST of BUFFER, the place Claude points you to.
+The highlight stays until you move out of those lines in that buffer,
+change them, or Claude shows something else."
+  (claude-pair-layout-unhighlight)
+  (with-current-buffer buffer
+    (save-restriction
+      (widen)
+      (save-excursion
+        (goto-char (point-min))
+        (forward-line (1- first))
+        (let ((beg (point)))
+          (forward-line (max 1 (1+ (- (or last first) first))))
+          (let ((overlay (make-overlay beg (point) nil t nil)))
+            (overlay-put overlay 'face 'claude-pair-shown)
+            (overlay-put overlay 'priority 50)
+            (overlay-put overlay 'claude-pair-shown t)
+            (overlay-put overlay 'modification-hooks
+                         (list (lambda (_ov after &rest _) (when after (claude-pair-layout-unhighlight)))))
+            (setq claude-pair-layout--shown overlay))))))
+  (add-hook 'post-command-hook #'claude-pair-layout--leave-shown))
+
 (defcustom claude-pair-focus-guard-seconds 3
   "Seconds after you use a window during which Claude leaves it alone."
   :type 'number
@@ -273,7 +324,9 @@ buffer a reused window showed)."
 Return (TEXT . ERROR)."
   (let* ((path (plist-get args :path))
          (line (plist-get args :line))
-         (line (and (natnump line) (> line 0) line)))
+         (line (and (natnump line) (> line 0) line))
+         (end (plist-get args :endLine))
+         (end (and line (natnump end) (>= end line) end)))
     (if (not (stringp path))
         (cons "open_file needs a path." t)
       (let ((name (claude-pair-layout--name path root))
@@ -294,6 +347,9 @@ Return (TEXT . ERROR)."
                                       (forward-line (1- line))
                                       (point))))))
                  (shown (claude-pair-layout-show buffer :pos pos :session session))
+                 (_ (when line
+                      (claude-pair-layout-highlight buffer line (or end line))
+                      (run-hook-with-args 'claude-pair-layout-shown-functions buffer line (or end line))))
                  (window (plist-get shown :window))
                  (at (if line (format " at line %d" line) "")))
             (pcase (plist-get shown :how)
