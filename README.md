@@ -32,7 +32,7 @@ See [PHASE-1.org](PHASE-1.org), [PHASE-2.org](PHASE-2.org),
   with an API key, Amazon Bedrock or Google Vertex AI
 - Linux or macOS; Windows support is built and tested under Wine, not yet
   on a real Windows (see [Windows](#windows))
-- Go 1.24 or later, only to build the daemon yourself
+- Go 1.26 or later, only to build the daemon yourself (1.27.4 or later for release builds)
 
 ## Install
 
@@ -617,6 +617,7 @@ and `daemon/internal/version`; pushing it builds the daemons and publishes them.
 | `lisp/` | The Emacs package |
 | `daemon/` | `claude-paird`, in Go (`cmd/claude-paird`, `internal/…`) |
 | `protocol/PROTOCOL.md` | The contract between the two |
+| `SECURITY.md` | What claude-pair trusts, how each way in is guarded, and how to report a problem |
 | `test/` | ERT tests, shared helpers and the checkdoc runner |
 | `daemon/internal/testutil/fakeclaude` | A stand-in for Claude Code that the tests drive; it never calls a model |
 | `PHASE-1.org` … `PHASE-4.org` | The checklists of each phase, with automatic and visual tests |

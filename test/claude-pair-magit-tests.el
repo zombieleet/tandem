@@ -124,7 +124,8 @@
         (should (member "--fork-session" command))
         (should (member "--no-session-persistence" command))
         (should (equal (cadr (member "--resume" command)) "sess-1"))
-        (should (string-match-p "diff --git a/x b/x\\'" (car (last command))))))
+        ;; The diff goes on standard input, never on the command line.
+        (should-not (seq-some (lambda (arg) (string-match-p "diff --git" arg)) command))))
     (cl-letf (((symbol-function 'claude-pair-chat--claude-path) (lambda () "/usr/bin/claude"))
               ((symbol-function 'claude-pair-magit--chat-session) (lambda (_root) nil)))
       (let ((command (claude-pair-magit--command root "d")))

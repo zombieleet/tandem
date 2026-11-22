@@ -19,8 +19,16 @@ deps:
 daemon:
 	cd daemon && $(GO) build -trimpath -o bin/claude-paird ./cmd/claude-paird
 
+# Release binaries carry Go's standard library: build them with a Go that
+# has the security fixes govulncheck asks for (see SECURITY.md).
+GO_RELEASE_MIN := 1.27.4
+
 ## dist: static daemons for Linux, macOS and Windows (amd64, arm64) and SHA256SUMS in dist/
 dist:
+	@have="$$($(GO) env GOVERSION | sed 's/^go//')"; \
+	  if [ "$$(printf '%s\n%s\n' "$(GO_RELEASE_MIN)" "$$have" | sort -V | head -n1)" != "$(GO_RELEASE_MIN)" ]; then \
+	    echo "make dist needs Go $(GO_RELEASE_MIN) or later for its security fixes; this is Go $$have."; \
+	    echo "Use a newer Go: with gvm, gvm install go1.27.4, then gvm use go1.27.4."; exit 1; fi
 	rm -rf dist && mkdir -p dist
 	cd daemon && for target in $(DIST_TARGETS); do \
 	  os=$${target%/*}; arch=$${target#*/}; ext=; [ $$os = windows ] && ext=.exe; \

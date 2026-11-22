@@ -281,15 +281,16 @@ unsaved changes are left alone."
           "trailers such as Co-Authored-By or Signed-off-by.\n\n"
           diff))
 
-(defun claude-pair-magit--command (root diff)
-  "Return the claude command line that drafts a message for DIFF in ROOT."
+(defun claude-pair-magit--command (root _diff)
+  "Return the claude command line that drafts a commit message in ROOT.
+The request, with the diff, goes on its standard input, not its command
+line: other users of the machine can read command lines."
   (let ((session (claude-pair-magit--chat-session root)))
     (append (list (claude-pair-chat--claude-path) "-p" "--output-format" "json" "--max-turns" "2")
             (when claude-pair-magit-model (list "--model" claude-pair-magit-model))
             ;; A copy of the chat, never saved: the chat stays as it is.
             (when session (list "--resume" session "--fork-session" "--no-session-persistence"))
-            (unless session (list "--no-session-persistence"))
-            (list (claude-pair-magit--prompt diff)))))
+            (unless session (list "--no-session-persistence")))))
 
 (defun claude-pair-magit--insert-message (buffer text)
   "Put TEXT as the message of the commit BUFFER, keeping its trailers."
@@ -323,6 +324,7 @@ said there.  The answer replaces the message in this buffer."
       (user-error "Nothing is staged"))
     (message "claude-pair: Claude is writing the commit message…")
     (let ((default-directory root))
+      (let ((process
       (make-process
        :name "claude-pair-commit-message"
        :buffer output
@@ -348,7 +350,9 @@ said there.  The answer replaces the message in this buffer."
                    (message "claude-pair: Claude wrote the commit message; edit it as you like"))
                   (t (message "claude-pair: no commit message from Claude%s"
                               (if (stringp text) (concat ": " text) "")))))
-             (kill-buffer output))))))))
+             (kill-buffer output)))))))
+        (process-send-string process (claude-pair-magit--prompt diff))
+        (process-send-eof process)))))
 
 (defun claude-pair-magit--setup-commit-buffer ()
   "In a new commit buffer: the trailer for Claude's lines, and maybe a draft."

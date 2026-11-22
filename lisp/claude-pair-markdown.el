@@ -83,15 +83,33 @@ A language not listed uses LANG-mode, or LANG-ts-mode, when one exists."
 
 ;;;; Colouring a block
 
+(defun claude-pair-markdown--major-mode-p (mode)
+  "Return non-nil if MODE is a major mode that is safe to call.
+The language after ``` comes from text Claude wrote, which may come from
+a file Claude read: a name like \"server\" must not toggle `server-mode',
+nor any other minor mode or command that ends in -mode."
+  (and (symbolp mode)
+       (fboundp mode)
+       (not (memq mode minor-mode-list))
+       (not (memq mode global-minor-modes))
+       (or (get mode 'derived-mode-parent)
+           (rassq mode auto-mode-alist)
+           (rassq mode interpreter-mode-alist)
+           (memq mode '(fundamental-mode text-mode prog-mode)))))
+
 (defun claude-pair-markdown--mode (language)
   "Return the major mode for LANGUAGE, or nil."
   (let* ((language (downcase (or language "")))
-         (mode (or (cdr (assoc language claude-pair-markdown-modes))
-                   (and (not (string-empty-p language)) (intern (concat language "-mode")))))
-         (ts (and (not (string-empty-p language)) (intern (concat language "-ts-mode")))))
+         (listed (cdr (assoc language claude-pair-markdown-modes)))
+         (guess (and (not (string-empty-p language))
+                     (string-match-p "\\`[a-z0-9+#-]+\\'" language)
+                     (intern (concat language "-mode"))))
+         (ts (and guess (intern (concat language "-ts-mode")))))
     (cond
-     ((and mode (fboundp mode)) mode)
-     ((and ts (fboundp ts) (fboundp 'treesit-language-available-p)
+     ;; Yours, from `claude-pair-markdown-modes': trusted as they are.
+     ((and listed (fboundp listed)) listed)
+     ((claude-pair-markdown--major-mode-p guess) guess)
+     ((and ts (claude-pair-markdown--major-mode-p ts) (fboundp 'treesit-language-available-p)
            (treesit-language-available-p (intern language)))
       ts))))
 
@@ -227,7 +245,9 @@ Earlier rendering there is removed first; backticks stay visible."
       line
       (replace-regexp-in-string "`\\([^`\n]+\\)`" "~\\1~")
       (replace-regexp-in-string "\\*\\*\\([^*\n]+\\)\\*\\*" "*\\1*")
-      (replace-regexp-in-string "\\[\\([^]\n]+\\)\\](\\([^)\n]+\\))" "[[\\2][\\1]]"))))
+      ;; Only links to the web, files and mail: an elisp: or shell: link
+      ;; from Claude's text must not become one you can click in Org.
+      (replace-regexp-in-string "\\[\\([^]\n]+\\)\\](\\(\\(?:https?\\|file\\|mailto\\):[^)\n]+\\))" "[[\\2][\\1]]"))))
 
 (defun claude-pair-markdown-to-org (text &optional level)
   "Return Markdown TEXT as Org, for a subtree at LEVEL (1 by default).
@@ -258,6 +278,10 @@ start a heading of its own by accident."
         (push (concat (match-string 1 line) "- " (claude-pair-markdown--org-inline (match-string 2 line))) lines))
        ((string-match-p "\\`\\*" line)
         (push (concat " " (claude-pair-markdown--org-inline line)) lines))
+       ;; #+INCLUDE, #+SETUPFILE, #+BIND and the like act on the Org file;
+       ;; from Claude they are text, shown as it is.
+       ((string-match-p "\\`[ \t]*#\\+" line)
+        (push (concat ": " line) lines))
        (t (push (claude-pair-markdown--org-inline line) lines))))
     (when in-code (push "#+end_src" lines))
     (string-join (nreverse lines) "\n")))
