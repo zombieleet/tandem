@@ -316,5 +316,21 @@
   (should (string-match-p "simple English" (default-value 'tandem-instructions)))
   (should (string-match-p "correct technical terms" (default-value 'tandem-instructions))))
 
+(ert-deftest tandem-chat-ignores-what-it-does-not-know ()
+  ;; A newer daemon may send update kinds and states this client does not
+  ;; know (see the protocol's Versions section).
+  (let ((tandem-chat--buffers (make-hash-table :test #'equal))
+        (chat (generate-new-buffer "*tandem: future test*")))
+    (unwind-protect
+        (with-current-buffer chat
+          (tandem-chat--setup "s1" "/tmp")
+          (tandem-chat--handle-update '(:kind "fromTheFuture" :anything 1))
+          (tandem-chat--handle-update '(:kind "status" :state "pondering" :extra t))
+          (should (equal tandem-chat--state "pondering"))
+          (tandem-chat--handle-update '(:kind "text" :delta "still here" :newField 2))
+          (tandem-chat--flush)
+          (should (string-match-p "still here" (buffer-substring-no-properties (point-min) tandem-chat--output))))
+      (kill-buffer chat))))
+
 (provide 'tandem-chat-tests)
 ;;; tandem-chat-tests.el ends here

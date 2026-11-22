@@ -1,8 +1,33 @@
 # tandem protocol
 
-Version **0.18.0**. This document is the contract between the Emacs client
+Version **1.0.0**. This document is the contract between the Emacs client
 (`lisp/`) and the daemon `tandemd` (`daemon/`). Either side can be
 replaced as long as it follows this document.
+
+## Versions
+
+The version is `MAJOR.MINOR.PATCH`. A client and a daemon work together
+when their major numbers match; `initialize` refuses any other pair with
+`-32001`.
+
+- **A minor version** only adds: methods, optional params, result and
+  update fields, update kinds, `status` states, error codes. Nothing
+  existing changes meaning or goes away.
+- **A patch version** only makes this document clearer.
+- **Anything else**, such as removing or renaming a method or field,
+  making an optional param required, or changing what a value means,
+  needs a new major version.
+
+So that additions never break anyone:
+
+- Both sides ignore fields they do not know, in params, results and
+  updates alike.
+- A client ignores `session/update` kinds and `status` states it does not
+  know, and shows a state it does not know as it is.
+- A daemon answers a method it does not know with `-32601`.
+- A client that wants a method or param added after 1.0.0 checks the
+  daemon's `protocolVersion` from `initialize` first, and does without it
+  when the daemon is older.
 
 ## Transport
 
@@ -63,8 +88,8 @@ request the receiver is still working on.
    socket accepts connections.
 2. The client sends `initialize`. Every other request before a successful
    `initialize` fails with `-32002`, except `shutdown`, so a client can stop a
-   daemon whose protocol it does not speak (from 0.4; older daemons need
-   SIGTERM, which they handle like `shutdown`).
+   daemon whose protocol it does not speak. The daemon also stops cleanly
+   on SIGTERM.
 3. The connection stays open for as long as the client wants it.
 4. With no clients connected and no turn running, the daemon exits after its
    idle timeout (default 600 seconds, `--idle-timeout`, `0` disables it).
@@ -81,7 +106,7 @@ Params:
 |---|---|---|
 | `protocolVersion` | string | Required. `MAJOR.MINOR.PATCH` |
 | `clientInfo` | `{name, version}` | Optional |
-| `capabilities` | object | Optional. `childFrames: boolean`, `maxWindows: number` |
+| `capabilities` | object | Optional, informational: `childFrames: boolean`, `maxWindows: number` |
 | `token` | string | Required over TCP: the endpoint file's token |
 
 Result:
@@ -91,11 +116,10 @@ Result:
 | `protocolVersion` | string |
 | `serverInfo` | `{name: "tandemd", version}` |
 | `pid` | number |
-| `capabilities` | object (empty in 0.1) |
+| `capabilities` | object, empty in 1.0.0 and reserved for additions |
 
-Versions are compatible when the major numbers match and, while the major
-number is `0`, the minor numbers match too. Otherwise the daemon answers
-`-32001` with `data: {daemonProtocolVersion, daemonVersion, pid}`.
+A version whose major number differs from the daemon's gets `-32001` with
+`data: {daemonProtocolVersion, daemonVersion, pid}` (see Versions).
 
 ### `daemon/status` (client → daemon)
 
@@ -215,7 +239,8 @@ session instead.
 ### `session/prompt` (client → daemon)
 
 Params: `sessionId`, `text`, optional `permissionMode`: `"default"` (the
-same as leaving it out) or `"plan"`. Result `{ok: true}` once the message is
+same as leaving it out) or `"plan"`. The `text` is sent to Claude as the
+user's message; it may start with `/` for a slash command. Result `{ok: true}` once the message is
 written to Claude Code; everything after that arrives as `session/update`.
 Fails with `-32003` while a turn is running, `-32004` for an unknown session
 and `-32602` for another mode. The calling client follows the session.
@@ -241,11 +266,16 @@ claude -p --input-format stream-json --output-format stream-json --verbose
            "timeout":86400000}}}'
        --permission-prompt-tool mcp__emacs__permission
        --allowedTools mcp__emacs__edit_file,mcp__emacs__write_file,
-                      mcp__emacs__open_file,mcp__emacs__close_window,mcp__emacs__list_windows
-       --append-system-prompt "<how files change and windows work in tandem,
-                               then the user's instructions>"
-       [--model M] (--session-id ID | --resume ID)
+                      mcp__emacs__open_file,mcp__emacs__close_window,mcp__emacs__list_windows,
+                      mcp__emacs__diagnostics,mcp__emacs__xref,mcp__emacs__imenu,mcp__emacs__selection
+       --append-system-prompt "<how files change, windows work and Emacs tools help
+                               in tandem, then the user's instructions>"
+       [--model M] (--session-id ID | --resume ID [--resume-session-at UUID])
 ```
+
+The exact arguments are the daemon's business, not the contract: a
+daemon may change them as Claude Code changes, as long as the behaviour
+described here stays.
 
 `<tandemd>` is `/proc/<daemon pid>/exe` on Linux, so a helper is always
 the daemon's own binary even after an upgrade replaced the file, and the
@@ -277,7 +307,7 @@ Params: `{sessionId, update}`. `update.kind` is one of:
 
 | kind | Fields | Meaning |
 |---|---|---|
-| `status` | `state`: `starting`, `running`, `requesting`, `cancelling`, `idle` | What the session is doing |
+| `status` | `state`: `starting`, `running`, `cancelling`, `idle` from the daemon; others, such as `requesting` or `compacting`, passed on from Claude Code | What the session is doing; the set is open (see Versions) |
 | `init` | `model`, `claudeVersion`, `cwd`, `permissionMode`, `slashCommands` | Claude Code started |
 | `text` | `delta` | More of Claude's answer |
 | `tool` | `id`, `name`, `title`, `status` (`started`, `done`, `error`), `durationMs` when finished | A tool call; `title` is one line such as `Read src/api.ts` |
@@ -318,7 +348,10 @@ timeout.
 5. Followers get `state: "answered"` with `decision`, `always` and `message`.
    A request is instead `state: "withdrawn"` with a `reason` when the turn is
    cancelled, the session closes, the daemon stops, or Claude Code abandons
-   the call.
+   the call. A withdrawn request is forgotten before the withdrawal is
+   sent, so an answer to it after that fails with `-32006`. After a
+   cancel, the withdrawal and the turn's `status` `idle` may arrive in
+   either order.
 6. The helper returns the decision to Claude Code as one text block of JSON:
    `{"behavior":"allow","updatedInput":...}` or
    `{"behavior":"deny","message":...}`. For "always", the allow carries
@@ -344,7 +377,9 @@ review itself is the question, and no permission rule can skip it.
    filePath, oldString, newString, replaceAll, content}` and waits.
 2. The daemon refuses, as an error result Claude reads, a path that is not
    absolute or not inside the session's directory (symbolic links are
-   resolved), and an edit whose old and new strings are the same.
+   resolved; on Windows a path such as `\etc\hosts` is on the drive of the
+   session's directory), and an edit whose old and new strings are the
+   same.
 3. The daemon sends the notification `edit/propose` `{requestId, sessionId,
    kind, filePath, oldString, newString, replaceAll, content}` to the client
    that answers for the session (as for permission questions), and followers
@@ -373,7 +408,9 @@ review itself is the question, and no permission rule can skip it.
    for a rejection, with the user's note, or for an error.
 6. A cancelled turn, a closed session, a stopping daemon or a departed helper
    withdraws the edit: the reviewing client gets `edit/withdraw` `{requestId,
-   reason}` and followers get `state: "withdrawn"`.
+   reason}` and followers get `state: "withdrawn"`. As for permission
+   questions, an answer after the withdrawal fails with `-32006`, and the
+   withdrawal and the end of a cancelled turn may arrive in either order.
 
 ## Windows
 
@@ -383,7 +420,7 @@ sees:
 
 | Tool | Inputs |
 |---|---|
-| `open_file` | `path` (absolute, or relative to the project), `line` (optional, from 1) |
+| `open_file` | `path` (absolute, or relative to the project), `line` (optional, from 1), `endLine` (optional: the last line of the range to highlight) |
 | `close_window` | `window`, an id from `list_windows` or `open_file` |
 | `list_windows` | none |
 | `diagnostics` | `path` (optional: without it, every open file of the project) |
@@ -415,7 +452,8 @@ types. Each runs in a short claude process of its own: by default the model
 `claude-haiku-5-5`, no tools, no settings or MCP servers, a system prompt of
 a few lines, low effort, in an empty directory of the daemon's. The daemon
 starts the next process ahead of time, so its start-up is not waited for,
-and stops it after five minutes without a request.
+and stops it after five minutes without a request. As for sessions, the
+exact `claude` arguments are the daemon's business.
 
 ### `suggest/complete` (client → daemon)
 
@@ -457,7 +495,7 @@ exits. Accepted before `initialize`; over TCP, only with the token then.
 | `-32003` | Session busy: a turn is running |
 | `-32004` | Unknown session |
 | `-32005` | Claude Code unavailable: missing, not executable, too old, or failed to start |
-| `-32006` | Unknown permission request: answered or withdrawn already |
+| `-32006` | Unknown request: a permission question, edit or tool call that was answered or withdrawn already, or is not this client's to answer |
 | `-32007` | Unauthorized: a TCP client without the endpoint file's token |
 | `-32008` | Superseded: a newer suggestion request, or `suggest/cancel`, ended it |
 | `-32800` | Request cancelled with `$/cancelRequest` |

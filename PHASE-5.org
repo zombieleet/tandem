@@ -163,11 +163,34 @@ with your login and no API key.
 - [X] With Company's popup open, =TAB= is still Company's
 - [X] =C-c c g= somewhere you did not type: a suggestion at once
 
-* TODO M6 · Protocol 1.0 [0/2]
-Started on branch =p5-m4-protocol= (parked, not yet checked); rebased
-after M5, which adds to the protocol.
-- [ ] Read the protocol document through; settle what is left open
-- [ ] Version 1.0.0: compatible while the major number matches
+* DONE M6 · Protocol 1.0 [3/3]
+The draft parked on =p5-m4-protocol= is brought onto M5 (its conflicts
+were only the version numbers) and checked.
+- [X] The protocol document read through against the code: every
+  promise checked (Claude Code 2.1.0 or newer, the 30 s Emacs tool
+  timeout, the 5 s kill after a cancel, =-32800=, empty capabilities, the
+  600 s idle default, plan mode's params). Settled: a new Versions section
+  (a minor version only adds; both sides ignore fields they do not know; a
+  client ignores update kinds and states it does not know and asks the
+  daemon's version before using anything newer); a withdrawn permission
+  question or edit is forgotten before its withdrawal is sent, and the
+  withdrawal and a cancelled turn's end may come in either order; the
+  suggestions and the full tool list (with =endLine=) are in; =claude='s
+  exact arguments are the daemon's business, for sessions and suggestions
+- [X] Version 1.0.0 on both sides: compatible while the major number
+  matches (1.0 with 1.9 works, 1.x with 2.0 is refused with =-32001=)
+- [X] Your check (below): "next"
+** Auto
+- [X] Go: the 1.x rules; unknown params and methods from a newer client.
+  ERT: unknown update kinds, states and fields from a newer daemon.
+  =make check= twice, the tests with your Doom packages, and the Windows
+  tests under Wine (all 9 packages), all clean
+** Visual gate (your turn)
+- [X] =make all=, restart Emacs, =y= to restart the daemon (it speaks
+  0.18.0, Emacs now 1.0.0). A chat, an edit to review, =C-c c p= and a
+  suggestion all work as before
+- [X] Read the Versions section at the top of =protocol/PROTOCOL.md=:
+  anything you would promise differently?
 
 * TODO M7 · Packaging [0/3]
 - [ ] Package headers and =package-lint= clean

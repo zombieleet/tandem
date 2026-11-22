@@ -248,13 +248,9 @@ func TestIncompatibleProtocol(t *testing.T) {
 	d := startDaemon(t, 0, "cpd-")
 	c := connect(t, d.opts.SocketPath)
 	cur, _ := protocol.ParseVersion(protocol.Version)
-	incompatible := []string{
-		fmt.Sprintf("%d.0.0", cur[0]+1),
-		fmt.Sprintf("%d.%d.0", cur[0], cur[1]+1),
-	}
-	if cur[1] > 0 {
-		incompatible = append(incompatible, fmt.Sprintf("%d.%d.0", cur[0], cur[1]-1))
-	}
+	// From 1.0 only the major number must match (see the protocol's Versions).
+	incompatible := []string{fmt.Sprintf("%d.0.0", cur[0]+1), "0.17.0"}
+	wantOK(t, connect(t, d.opts.SocketPath).initialize(fmt.Sprintf("%d.%d.0", cur[0], cur[1]+1)))
 	for _, v := range incompatible {
 		m := c.initialize(v)
 		wantCode(t, m, protocol.IncompatibleProtocol)

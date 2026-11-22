@@ -493,3 +493,22 @@ func TestAllSessions(t *testing.T) {
 	c2 := ready(t, d)
 	wantOK(t, c2.request("session/all", nil))
 }
+
+func TestUnknownFieldsAreIgnored(t *testing.T) {
+	// A newer client may send params this daemon does not know (see the
+	// protocol's Versions section).
+	d := startDaemon(t, 0, "cpd-")
+	c := connect(t, d.opts.SocketPath)
+	wantOK(t, c.request("initialize", map[string]any{"protocolVersion": protocol.Version, "token": c.token,
+		"clientInfo": map[string]string{"name": "test"}, "fromTheFuture": map[string]any{"x": 1}}))
+	m := c.request("session/new", map[string]any{"cwd": projectDir(t), "claudePath": fakeClaude,
+		"fromTheFuture": true})
+	wantOK(t, m)
+	var r struct{ SessionID string }
+	json.Unmarshal(m.Result, &r)
+	wantOK(t, c.request("session/prompt", map[string]any{"sessionId": r.SessionID, "text": "hi", "fromTheFuture": 1}))
+	if got := turnText(c.untilIdle(r.SessionID)); got != "You said: hi" {
+		t.Fatalf("text %q", got)
+	}
+	wantCode(t, c.request("session/fromTheFuture", nil), protocol.MethodNotFound)
+}
