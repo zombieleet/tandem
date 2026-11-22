@@ -13,6 +13,8 @@
 (require 'cl-lib)
 (require 'tandem)
 (require 'tandem-magit)
+
+(defvar git-commit-setup-hook)
 (require 'tandem-test-helpers)
 
 (defmacro tandem-test-with-repo (&rest body)
@@ -88,6 +90,16 @@
 (defconst tandem-test--trailer "Co-Authored-By: Claude <noreply@anthropic.com>"
   "A trailer some users want.")
 
+(ert-deftest tandem-magit-mode-adds-and-removes-its-hook ()
+  ;; Loading tandem-magit changes nothing; the mode adds the hook.
+  (let ((git-commit-setup-hook nil))
+    (tandem-magit-mode -1)
+    (should-not (memq #'tandem-magit--setup-commit-buffer git-commit-setup-hook))
+    (tandem-magit-mode 1)
+    (should (memq #'tandem-magit--setup-commit-buffer git-commit-setup-hook))
+    (tandem-magit-mode -1)
+    (should-not (memq #'tandem-magit--setup-commit-buffer git-commit-setup-hook))))
+
 (ert-deftest tandem-magit-trailer ()
   (let ((tandem-magit-trailer tandem-test--trailer))
   (with-temp-buffer
@@ -134,32 +146,35 @@
 
 (ert-deftest tandem-magit-in-a-commit-buffer ()
   (skip-unless (require 'git-commit nil t))
-  (tandem-test-with-repo
-    (tandem-test--write "geo.py" 6 "    \"\"\"Area.\"\"\"\n" t)
-    (tandem-magit-stage-claude)
-    (let ((file (expand-file-name ".git/COMMIT_EDITMSG" root)))
-      (with-temp-file file (insert "\n# Please enter the commit message for your changes.\n"))
-      (let ((buffer (find-file-noselect file)))
-        (unwind-protect
-            (with-current-buffer buffer
-              (should (derived-mode-p 'text-mode))
-              (should (bound-and-true-p git-commit-mode))
-              ;; No trailer unless you ask for one.
-              (should-not (string-match-p "Co-Authored-By" (buffer-string))))
-          (with-current-buffer buffer
-            (set-buffer-modified-p nil)
-            (setq-local kill-buffer-query-functions nil))
-          (kill-buffer buffer)))
-      (let* ((tandem-magit-trailer tandem-test--trailer)
-             (buffer (find-file-noselect file)))
-        (unwind-protect
-            (with-current-buffer buffer
-              (should (string-match-p "^Co-Authored-By: Claude <noreply@anthropic.com>$" (buffer-string))))
-          (with-current-buffer buffer
-            (set-buffer-modified-p nil)
-            ;; with-editor would ask to cancel the commit instead.
-            (setq-local kill-buffer-query-functions nil))
-          (kill-buffer buffer))))))
+  (tandem-magit-mode 1)
+  (unwind-protect
+      (tandem-test-with-repo
+       (tandem-test--write "geo.py" 6 "    \"\"\"Area.\"\"\"\n" t)
+       (tandem-magit-stage-claude)
+       (let ((file (expand-file-name ".git/COMMIT_EDITMSG" root)))
+	 (with-temp-file file (insert "\n# Please enter the commit message for your changes.\n"))
+	 (let ((buffer (find-file-noselect file)))
+           (unwind-protect
+               (with-current-buffer buffer
+		 (should (derived-mode-p 'text-mode))
+		 (should (bound-and-true-p git-commit-mode))
+		 ;; No trailer unless you ask for one.
+		 (should-not (string-match-p "Co-Authored-By" (buffer-string))))
+             (with-current-buffer buffer
+               (set-buffer-modified-p nil)
+               (setq-local kill-buffer-query-functions nil))
+             (kill-buffer buffer)))
+	 (let* ((tandem-magit-trailer tandem-test--trailer)
+		(buffer (find-file-noselect file)))
+           (unwind-protect
+               (with-current-buffer buffer
+		 (should (string-match-p "^Co-Authored-By: Claude <noreply@anthropic.com>$" (buffer-string))))
+             (with-current-buffer buffer
+               (set-buffer-modified-p nil)
+               ;; with-editor would ask to cancel the commit instead.
+               (setq-local kill-buffer-query-functions nil))
+             (kill-buffer buffer)))))
+    (tandem-magit-mode -1)))
 
 (provide 'tandem-magit-tests)
 ;;; tandem-magit-tests.el ends here

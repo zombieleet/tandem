@@ -23,8 +23,9 @@
 
 ;;; Commentary:
 
-;; Optional: load it with (require 'tandem-magit), or let `tandem'
-;; load it once Magit is there.
+;; Optional.  The commands below load it when you first use them;
+;; (tandem-magit-mode 1) also adds the trailer and the automatic draft,
+;; if you want them, to every new commit message buffer.
 ;;
 ;; M-x tandem-magit-stage-claude stages the hunks you accepted from
 ;;   Claude: the uncommitted changes whose new lines are all Claude's, from
@@ -366,7 +367,15 @@ said there.  The answer replaces the message in this buffer."
                  (tandem-magit--chat-session root))
         (tandem-magit-draft-message)))))
 
-(add-hook 'git-commit-setup-hook #'tandem-magit--setup-commit-buffer)
+;;;###autoload
+(define-minor-mode tandem-magit-mode
+  "Add the trailer and draft you asked for to new commit message buffers.
+See `tandem-magit-trailer' and `tandem-magit-draft-automatically'."
+  :global t
+  :group 'tandem
+  (if tandem-magit-mode
+      (add-hook 'git-commit-setup-hook #'tandem-magit--setup-commit-buffer)
+    (remove-hook 'git-commit-setup-hook #'tandem-magit--setup-commit-buffer)))
 
 (provide 'tandem-magit)
 ;;; tandem-magit.el ends here

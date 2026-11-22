@@ -46,6 +46,27 @@ See [PHASE-1.org](PHASE-1.org), [PHASE-2.org](PHASE-2.org),
 tandem has two parts: the Emacs package in `lisp/` and the daemon,
 `tandemd`.
 
+### From a package archive
+
+Once tandem is on MELPA:
+
+```elisp
+(use-package tandem
+  :ensure t
+  :demand t
+  :bind ("C-c C" . tandem))
+```
+
+The first time tandem needs its daemon, it offers to download the one for
+your system from the GitHub release of the same version (`M-x
+tandem-install-daemon` does it too). Before keeping it, it checks the
+file's SHA-256 against the one the package itself holds, written when the
+release was built, so a file changed on the server or on the way is
+refused. It goes into `~/.emacs.d/tandem/` (`tandem-daemon-directory`).
+The manual is in `C-h i`.
+
+### From a checkout
+
 **The daemon.** Build it from a checkout:
 
 ```sh
@@ -67,6 +88,10 @@ com.apple.quarantine ~/.local/bin/tandemd`. If Emacs does not see your
 shell's `PATH` (common for the macOS app), set `tandem-daemon-command`
 to `'("/full/path/to/tandemd")`, and `tandem-claude-command` the
 same way if `claude` is not found.
+
+tandem looks for the daemon in this order: `tandem-daemon-command`,
+`tandemd` on the `PATH`, the one `make daemon` built in the checkout, the
+one `tandem-install-daemon` installed.
 
 **The package**, with a suggested key binding (`C-c` and a letter are yours
 to bind; pick any free one):
@@ -405,13 +430,18 @@ the heading as a new subheading, in Org syntax. With `C-u`, Claude plans
 first. The project is the one the Org file is in; for notes kept
 elsewhere, you pick it.
 
-With Embark, `@` in its action menu asks Claude about the target: a file
-(mentioned in your question), a symbol (with where you are), or a region
-(as `tandem-ask`, with the answer shown above it too).
+With Embark and `(tandem-embark-mode 1)`, `@` in its action menu asks
+Claude about the target: a file (mentioned in your question), a symbol
+(with where you are), or a region (as `tandem-ask`, with the answer shown
+above it too). Turn it on once Embark is loaded:
+`(with-eval-after-load 'embark (tandem-embark-mode 1))`, or Doom's
+`(after! embark (tandem-embark-mode 1))`.
 
 ## Commits with Magit
 
-With Magit installed, `tandem-magit.el` loads by itself:
+The two commands below load `tandem-magit.el` when you first use them.
+`(tandem-magit-mode 1)` also adds the trailer and the automatic draft,
+if you set the options for them, to every new commit message buffer.
 
 - `M-x tandem-magit-stage-claude` stages the hunks you accepted from
   Claude, and only those: the changes whose new lines are all Claude's

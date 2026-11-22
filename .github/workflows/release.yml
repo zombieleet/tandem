@@ -1,6 +1,9 @@
 # Pushing a tag vX.Y.Z checks that it matches the daemon's and the
 # package's version, builds the daemons with make dist and publishes them,
-# with SHA256SUMS, as a GitHub release.
+# with SHA256SUMS, as a GitHub release -- but only if they are byte for
+# byte the daemons whose SHA-256 the package holds in
+# lisp/tandem-daemon-sums.el (make dist sums, run before tagging, wrote
+# them). The build is reproducible with the same Go, so they are.
 name: release
 
 on:
@@ -15,12 +18,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # The newest Go: release binaries carry its standard library and its
-      # security fixes (make dist refuses an old one).
+      # Exactly the Go the sums were made with (make dist refuses another).
+      - name: Read the release's Go version
+        id: go
+        run: echo "version=$(make -s print-go-release)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
-          check-latest: true
+          go-version: ${{ steps.go.outputs.version }}
           cache-dependency-path: daemon/go.sum
       - name: Check the tag matches the version
         run: |
@@ -30,7 +34,11 @@ jobs:
           if [ "$tag" != "$daemon" ] || [ "$tag" != "$package" ]; then
             echo "tag $tag, daemon $daemon, package $package: they must match"; exit 1
           fi
+      - uses: purcell/setup-emacs@master
+        with:
+          version: "30.1"
       - run: make dist
+      - run: make check-sums
       - run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

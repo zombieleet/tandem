@@ -192,11 +192,40 @@ were only the version numbers) and checked.
 - [X] Read the Versions section at the top of =protocol/PROTOCOL.md=:
   anything you would promise differently?
 
-* TODO M7 · Packaging [0/3]
-- [ ] Package headers and =package-lint= clean
-- [ ] A MELPA recipe; the daemon downloaded and checked by Emacs on first
-  use, or built from the checkout
-- [ ] Installing from a package, not the checkout, works end to end
+* DONE M7 · Packaging [4/4]
+- [X] =package-lint= clean on every file (=jsonrpc= checked against the
+  real GNU ELPA: 1.0.30 there, and Emacs 30 has 1.0.25 built in). Fixed
+  for it: the summary line; loading tandem no longer changes other
+  packages: Embark's "@" is =tandem-embark-mode=, Magit's commit-buffer
+  hook =tandem-magit-mode= (both on in your Doom config, so nothing
+  changes for you); the Info directory is set without waiting for info.el
+- [X] A MELPA recipe (=recipes/tandem=: =lisp/*.el= and =doc/tandem.texi=,
+  whose @include works as package-build runs makeinfo in place). For a
+  package install, =M-x tandem-install-daemon= (also offered when no
+  daemon is found) downloads the daemon for this system from the GitHub
+  release of the same version and keeps it only if its SHA-256 is the one
+  the package holds (=tandem-daemon-sums.el=, written by =make dist sums=):
+  a file changed on the server or on the way is refused. That works
+  because =make dist= is now reproducible (=-trimpath -buildvcs=false=, an
+  empty build ID, exactly Go 1.27.4): two builds from two places gave
+  identical bytes; the release workflow builds with the same Go and
+  publishes only if =make check-sums= passes. Steps in =RELEASING.md=
+- [X] Installing from a package works end to end: =make test-package=
+  builds tandem with MELPA's own package-build (31 files: no tests, no
+  Go), installs it in a fresh =emacs -Q=, checks the autoloads and that
+  =C-h i= finds the manual, installs the daemon from a local release with
+  the SHA-256 check, and chats through it with the fake claude. A failing
+  run cleans up after itself (checked by forcing one)
+- [X] Your check (below): "thanks, push it"
+** Auto
+- [X] ERT (7 new): the checked install, a changed file refused, an error
+  page refused, no sums for this version, the platforms, where tandem
+  looks for the daemon (and asks first); the Embark and Magit modes on and
+  off. =make check=, the tests with your Doom packages, =make test-package=
+** Visual gate (your turn)
+- [X] =make all=, restart Emacs: everything as before, "@" in Embark's menu
+  still there
+- [X] Read =RELEASING.md=: is that a release process you would follow?
 
 * TODO M8 · GitHub [0/3]
 - [ ] A GitHub repository (you create it, or tell me to), the code pushed

@@ -1,4 +1,4 @@
-;;; tandem.el --- Pair-program with Claude inside Emacs  -*- lexical-binding: t; -*-
+;;; tandem.el --- Pair-program with Claude Code  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 Victory
 
@@ -62,20 +62,25 @@
 (defconst tandem--doc-directory
   (expand-file-name "../doc/" (file-name-directory (or load-file-name buffer-file-name "")))
   "Where the manual is built in a checkout.")
+(defvar Info-additional-directory-list)
 (when (file-exists-p (expand-file-name "dir" tandem--doc-directory))
-  (with-eval-after-load 'info
-    (defvar Info-additional-directory-list)
-    (add-to-list 'Info-additional-directory-list tandem--doc-directory t)))
+  ;; Before info.el loads, its defcustom keeps a value set here.
+  (setq Info-additional-directory-list
+        (append (bound-and-true-p Info-additional-directory-list)
+                (list tandem--doc-directory))))
 
-;; Optional parts: each loads only with the package it works with.
+;; Optional parts, for a checkout (a package's autoloads say the same):
+;; each loads when first used.
 (autoload 'tandem-magit-stage-claude "tandem-magit"
   "Stage the hunks you accepted from Claude, and only those." t)
 (autoload 'tandem-magit-draft-message "tandem-magit"
   "Have Claude write the commit message for what is staged." t)
-(with-eval-after-load 'git-commit (require 'tandem-magit))
+(autoload 'tandem-magit-mode "tandem-magit"
+  "In new commit message buffers, add the trailer and the draft you asked for." t)
 (autoload 'tandem-org-send-subtree "tandem-org"
   "Send the Org subtree at point to Claude as a task." t)
-(with-eval-after-load 'embark (require 'tandem-embark))
+(autoload 'tandem-embark-mode "tandem-embark"
+  "Put \"@\" in Embark's action menus: ask Claude about the target." t)
 
 ;;;###autoload
 (defun tandem-connect ()

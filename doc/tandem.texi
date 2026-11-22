@@ -103,10 +103,37 @@ or set up with an API key, Amazon Bedrock or Google Vertex AI.  To build
 the daemon yourself you need Go 1.26 or later.
 
 @menu
+* From a package archive::
 * The daemon binary::
 * The package::
 * First start::
 @end menu
+
+@node From a package archive
+@section From a package archive
+
+@findex tandem-install-daemon
+@vindex tandem-daemon-directory
+Installed from a package archive such as MELPA:
+
+@lisp
+(use-package tandem
+  :ensure t
+  :demand t
+  :bind ("C-c C" . tandem))
+@end lisp
+
+The first time tandem needs its daemon, it offers to download the one
+for your system from the GitHub release of the same version; @kbd{M-x
+tandem-install-daemon} does it too.  Before keeping the file, tandem
+checks its SHA-256 against the one the package itself holds, written when
+the release was built, so a file changed on the server or on the way is
+refused.  It goes into @code{tandem-daemon-directory}.  The rest of this
+chapter is for a checkout.
+
+tandem looks for the daemon in this order: @code{tandem-daemon-command},
+@command{tandemd} on the @env{PATH}, the one @command{make daemon} built
+in a checkout, the one @code{tandem-install-daemon} installed.
 
 @node The daemon binary
 @section The daemon binary
@@ -512,8 +539,14 @@ heading, in Org syntax.  With @kbd{C-u}, Claude plans first.
 @node Embark
 @section Embark
 
-With Embark, @kbd{@@} in its action menu asks Claude about the target: a
-file, a symbol (with where you are), or a region.
+@findex tandem-embark-mode
+With Embark and @code{tandem-embark-mode} on, @kbd{@@} in its action
+menu asks Claude about the target: a file, a symbol (with where you are),
+or a region.  Turn it on once Embark is loaded:
+
+@lisp
+(with-eval-after-load 'embark (tandem-embark-mode 1))
+@end lisp
 
 @node Chats over time
 @chapter Chats over time
@@ -574,6 +607,12 @@ chat, in a copy of the chat that is never saved.
 No @samp{Co-Authored-By} trailer is added unless you set
 @code{tandem-magit-trailer}.
 @end itemize
+
+@findex tandem-magit-mode
+The two commands load what they need when you first use them.
+@code{(tandem-magit-mode 1)} also adds the trailer and the automatic
+draft (@code{tandem-magit-draft-automatically}), if you set the options
+for them, to every new commit message buffer.
 
 @node Windows
 @chapter Windows

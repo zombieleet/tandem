@@ -375,6 +375,14 @@ Default: @code{60000}.  Most characters of the staged diff Claude reads for a co
 @vindex tandem-magit-draft-automatically
 Default: @code{nil}.  Non-nil to draft the message whenever a commit buffer opens empty.
 
+@item tandem-magit-mode
+@vindex tandem-magit-mode
+Default: @code{nil}.  Non-nil if Tandem-Magit mode is enabled. See the @code{tandem-magit-mode} command for a description of this minor mode. Setting this variable directly does not take effect; either customize it (see the info node @code{Easy Customization}) or call the function @code{tandem-magit-mode}.
+
+@item tandem-magit-mode-hook
+@vindex tandem-magit-mode-hook
+Default: @code{nil}.  Hook run after entering or leaving @code{tandem-magit-mode}. No problems result if this variable is not bound. @code{add-hook} automatically binds it.  (This is true for all hook variables.)
+
 @item tandem-magit-model
 @vindex tandem-magit-model
 Default: @code{"haiku"}.  Model that drafts commit messages; nil for Claude Code's default.

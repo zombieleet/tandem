@@ -29,7 +29,9 @@
 ;;   a symbol      the question names it and where you are
 ;;   a region      as M-x tandem-ask: the answer also shows above it
 ;;
-;; Loaded by itself once Embark is.
+;; Turn it on with (tandem-embark-mode 1), after Embark is loaded:
+;; Doom's (after! embark (tandem-embark-mode 1)), or
+;; (with-eval-after-load 'embark (tandem-embark-mode 1)) elsewhere.
 
 ;;; Code:
 
@@ -85,10 +87,21 @@
   (push-mark end t t)
   (call-interactively #'tandem-ask))
 
-(keymap-set embark-file-map "@" #'tandem-embark-ask-file)
-(keymap-set embark-identifier-map "@" #'tandem-embark-ask-symbol)
-(keymap-set embark-symbol-map "@" #'tandem-embark-ask-symbol)
-(keymap-set embark-region-map "@" #'tandem-embark-ask-region)
+;;;###autoload
+(define-minor-mode tandem-embark-mode
+  "Put \"@\" in Embark's action menus: ask Claude about the target.
+For a file, a symbol, or a region."
+  :global t
+  :group 'tandem
+  (require 'embark)
+  (dolist (binding `((,embark-file-map . tandem-embark-ask-file)
+                     (,embark-identifier-map . tandem-embark-ask-symbol)
+                     (,embark-symbol-map . tandem-embark-ask-symbol)
+                     (,embark-region-map . tandem-embark-ask-region)))
+    (if tandem-embark-mode
+        (keymap-set (car binding) "@" (cdr binding))
+      (when (eq (keymap-lookup (car binding) "@") (cdr binding))
+        (keymap-unset (car binding) "@" t)))))
 
 (provide 'tandem-embark)
 ;;; tandem-embark.el ends here

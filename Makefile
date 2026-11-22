@@ -5,9 +5,9 @@ TESTS := $(wildcard test/*-tests.el)
 
 VERSION ?= $(shell sed -n 's/^var Version = "\(.*\)"/\1/p' daemon/internal/version/version.go)
 DIST_TARGETS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
-LDFLAGS := -s -w -X github.com/victory/tandem/daemon/internal/version.Version=$(VERSION)
+LDFLAGS := -s -w -buildid= -X github.com/victory/tandem/daemon/internal/version.Version=$(VERSION)
 
-.PHONY: all deps daemon fakeclaude compile info reference check-manual test test-lisp test-lisp-tcp test-daemon test-wine vet versions checkdoc check dist print-version clean help
+.PHONY: all deps daemon fakeclaude compile info reference check-manual test test-lisp test-lisp-tcp test-daemon test-wine vet versions checkdoc check dist sums check-sums print-version print-go-release test-package clean help
 
 all: daemon compile info
 
@@ -39,23 +39,45 @@ daemon:
 	cd daemon && $(GO) build -trimpath -o bin/tandemd ./cmd/tandemd
 
 # Release binaries carry Go's standard library: build them with a Go that
-# has the security fixes govulncheck asks for (see SECURITY.md).
-GO_RELEASE_MIN := 1.27.4
+# has the security fixes govulncheck asks for (see SECURITY.md). Exactly
+# this one: the build is reproducible, so the release workflow, with the
+# same Go, makes the very bytes whose SHA-256 the package holds.
+GO_RELEASE := 1.27.4
 
-## dist: static daemons for Linux, macOS and Windows (amd64, arm64) and SHA256SUMS in dist/
+## dist: reproducible static daemons for Linux, macOS and Windows (amd64, arm64) and SHA256SUMS in dist/
 dist:
 	@have="$$($(GO) env GOVERSION | sed 's/^go//')"; \
-	  if [ "$$(printf '%s\n%s\n' "$(GO_RELEASE_MIN)" "$$have" | sort -V | head -n1)" != "$(GO_RELEASE_MIN)" ]; then \
-	    echo "make dist needs Go $(GO_RELEASE_MIN) or later for its security fixes; this is Go $$have."; \
-	    echo "Use a newer Go: with gvm, gvm install go1.27.4, then gvm use go1.27.4."; exit 1; fi
+	  if [ "$$have" != "$(GO_RELEASE)" ]; then \
+	    echo "make dist needs exactly Go $(GO_RELEASE), for its security fixes and so that the release"; \
+	    echo "workflow builds the same bytes; this is Go $$have. With gvm: gvm install go$(GO_RELEASE)."; exit 1; fi
 	rm -rf dist && mkdir -p dist
 	cd daemon && for target in $(DIST_TARGETS); do \
 	  os=$${target%/*}; arch=$${target#*/}; ext=; [ $$os = windows ] && ext=.exe; \
-	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags '$(LDFLAGS)' \
+	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch GOFLAGS= $(GO) build -trimpath -buildvcs=false -ldflags '$(LDFLAGS)' \
 	    -o ../dist/tandemd-$(VERSION)-$$os-$$arch$$ext ./cmd/tandemd || exit 1; \
 	done
 	cd dist && if command -v sha256sum >/dev/null; then sha256sum tandemd-* > SHA256SUMS; \
 	  else shasum -a 256 tandemd-* > SHA256SUMS; fi
+
+## sums: write dist/SHA256SUMS into lisp/tandem-daemon-sums.el, which tandem-install-daemon checks downloads against
+sums:
+	$(EMACS) -Q --batch -l doc/gen-sums.el -f tandem-gen-sums $(VERSION) dist/SHA256SUMS lisp/tandem-daemon-sums.el
+
+## check-sums: fail unless dist/ holds exactly the daemons whose sums lisp/tandem-daemon-sums.el holds
+check-sums:
+	@tmp=$$(mktemp) && $(EMACS) -Q --batch -l doc/gen-sums.el -f tandem-gen-sums $(VERSION) dist/SHA256SUMS $$tmp && \
+	  if ! cmp -s $$tmp lisp/tandem-daemon-sums.el; then rm -f $$tmp; \
+	    echo "dist/ does not hold the daemons lisp/tandem-daemon-sums.el is for: run make dist sums with Go $(GO_RELEASE), commit"; exit 1; fi; \
+	  rm -f $$tmp; echo "dist/ matches lisp/tandem-daemon-sums.el"
+
+## test-package: build tandem as MELPA does, install it in a fresh Emacs, install the daemon, chat (needs PACKAGE_BUILD, makeinfo)
+test-package: daemon fakeclaude
+	@[ -n "$(PACKAGE_BUILD)" ] || { echo "Set PACKAGE_BUILD to a checkout of github.com/melpa/package-build"; \
+	  echo "(and COMPAT to the compat package's directory, on Emacs before 31)"; exit 1; }
+	$(EMACS) -Q --batch -L $(PACKAGE_BUILD) $(if $(COMPAT),-L $(COMPAT)) -l test/package-e2e.el -f tandem-package-e2e
+
+print-go-release:
+	@echo $(GO_RELEASE)
 
 ## fakeclaude: build the stand-in for Claude Code that the ERT tests use
 fakeclaude:

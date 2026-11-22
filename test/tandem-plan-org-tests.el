@@ -123,9 +123,16 @@
 (ert-deftest tandem-embark-actions ()
   (skip-unless (require 'embark nil t))
   (require 'tandem-embark)
+  ;; Nothing changes in Embark's menus until you turn the mode on.
+  (tandem-embark-mode -1)
+  (should-not (keymap-lookup embark-file-map "@"))
+  (tandem-embark-mode 1)
   (should (eq (keymap-lookup embark-file-map "@") #'tandem-embark-ask-file))
   (should (eq (keymap-lookup embark-identifier-map "@") #'tandem-embark-ask-symbol))
   (should (eq (keymap-lookup embark-region-map "@") #'tandem-embark-ask-region))
+  (tandem-embark-mode -1)
+  (should-not (keymap-lookup embark-region-map "@"))
+  (tandem-embark-mode 1)
   (let ((dir (file-name-as-directory (tandem-test--private-dir))) sent)
     (unwind-protect
         (progn

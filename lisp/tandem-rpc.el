@@ -141,18 +141,31 @@ Keep this in step with daemon/internal/paths."
   (expand-file-name (or tandem-socket-path
                         (tandem-rpc-default-socket-path))))
 
+(declare-function tandem-install-daemon "tandem-install")
+(declare-function tandem-install-daemon-path "tandem-install")
+(declare-function tandem-install-available-p "tandem-install")
+
 (defun tandem-rpc-daemon-command ()
   "Return the command list for starting the daemon.
-Signal a `user-error' when no daemon can be found."
+In order: `tandem-daemon-command', tandemd on the PATH, the one \"make
+daemon\" built in a checkout, the one `tandem-install-daemon' installed.
+With none, offer to install it; signal a `user-error' if that cannot be."
+  (require 'tandem-install)
   (or tandem-daemon-command
       (when-let* ((exe (executable-find "tandemd")))
         (list exe))
       (let ((built (tandem-rpc--built-daemon)))
         (when (file-executable-p built)
           (list built)))
-      (user-error "Cannot find tandemd; run \"make daemon\" in %s or set `tandem-daemon-command'"
-                  (abbreviate-file-name
-                   (file-name-directory (directory-file-name tandem-rpc--directory))))))
+      (let ((installed (tandem-install-daemon-path)))
+        (when (file-executable-p installed)
+          (list installed)))
+      (and (tandem-install-available-p)
+           (not noninteractive)
+           (y-or-n-p (format "Download tandem's daemon, tandemd %s, from GitHub and check it? "
+                             tandem-version))
+           (list (tandem-install-daemon)))
+      (user-error "Cannot find tandemd: M-x tandem-install-daemon downloads it, \"make daemon\" in a checkout builds it, or set `tandem-daemon-command'")))
 
 (defun tandem-rpc--built-daemon ()
   "Return where \"make daemon\" puts the daemon binary."
