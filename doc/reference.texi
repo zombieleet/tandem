@@ -139,9 +139,25 @@ Close the connection to the daemon and leave the daemon running.
 @findex tandem-do
 Tell Claude to do CHOICE with the region, or the function or line at point. CHOICE is a name from @code{tandem-do-actions} or an instruction of your own. Claude's change comes as hunks in this buffer for you to review.  With PLAN (\[universal-argument]), Claude plans first, in an Org buffer you can edit.
 
+@item M-x tandem-embark-ask-file
+@findex tandem-embark-ask-file
+Ask Claude a question about FILE.
+
+@item M-x tandem-embark-ask-region
+@findex tandem-embark-ask-region
+Ask Claude about the region from BEG to END, as @code{tandem-ask} does.
+
+@item M-x tandem-embark-ask-symbol
+@findex tandem-embark-ask-symbol
+Ask Claude a question about SYMBOL, where you are.
+
 @item M-x tandem-events-buffer
 @findex tandem-events-buffer
 Show the log of messages exchanged with the daemon.
+
+@item M-x tandem-install-daemon
+@findex tandem-install-daemon
+Download the daemon for this system and this tandem's version. It is checked against the SHA-256 this package holds before it is kept. Return its path.
 
 @item M-x tandem-locations
 @findex tandem-locations
@@ -285,7 +301,7 @@ Remove the git worktree at PATH and close its chat. Refuse when it has changes n
 @table @code
 @item tandem-attribution-directory
 @vindex tandem-attribution-directory
-Default: @code{"/home/victory/.cache/tandem/attribut...}.  Directory holding, for each file, which of its lines Claude wrote. It is made private to you (mode 700).
+Default: @code{(expand-file-name "tandem/attribution...}.  Directory holding, for each file, which of its lines Claude wrote. It is made private to you (mode 700).
 
 @item tandem-attribution-ignore-whitespace
 @vindex tandem-attribution-ignore-whitespace
@@ -327,9 +343,17 @@ Default: @code{nil}.  Path of the claude command, or nil to look for "claude" on
 @vindex tandem-daemon-command
 Default: @code{nil}.  Command that runs tandemd, as a list of strings. When nil, use "tandemd" from variable @code{exec-path}, or else the binary that "make daemon" builds next to this package.
 
+@item tandem-daemon-directory
+@vindex tandem-daemon-directory
+Default: @code{(locate-user-emacs-file "tandem/")}.  Where @code{tandem-install-daemon} puts the daemon.
+
 @item tandem-daemon-idle-timeout
 @vindex tandem-daemon-idle-timeout
 Default: @code{600}.  Seconds the daemon keeps running with no Emacs connected. Zero keeps it running until you stop it.  Applies to daemons that Emacs starts.
+
+@item tandem-daemon-release-url
+@vindex tandem-daemon-release-url
+Default: @code{"https://github.com/zombieleet/tandem...}.  Where released daemons are: a format of the version and the file name.
 
 @item tandem-daemon-start-timeout
 @vindex tandem-daemon-start-timeout
@@ -337,11 +361,19 @@ Default: @code{10}.  Seconds to wait for a newly started daemon to accept connec
 
 @item tandem-daemon-transport
 @vindex tandem-daemon-transport
-Default: @code{unix}.  How Emacs reaches the daemon. unix: a Unix socket.  tcp: a port on this machine only, which the daemon writes with a secret token to an endpoint file; Emacs on Windows has no Unix sockets.
+Default: @code{(if (eq system-type 'windows-nt) 'tcp...}.  How Emacs reaches the daemon. unix: a Unix socket.  tcp: a port on this machine only, which the daemon writes with a secret token to an endpoint file; Emacs on Windows has no Unix sockets.
 
 @item tandem-do-actions
 @vindex tandem-do-actions
 Default: @code{(("Refactor" . "Refactor this code to...}.  Instructions @code{tandem-do} offers, as (NAME . INSTRUCTION). You can always type your own instead.
+
+@item tandem-embark-mode
+@vindex tandem-embark-mode
+Default: @code{nil}.  Non-nil if Tandem-Embark mode is enabled. See the @code{tandem-embark-mode} command for a description of this minor mode. Setting this variable directly does not take effect; either customize it (see the info node @code{Easy Customization}) or call the function @code{tandem-embark-mode}.
+
+@item tandem-embark-mode-hook
+@vindex tandem-embark-mode-hook
+Default: @code{nil}.  Hook run after entering or leaving @code{tandem-embark-mode}. No problems result if this variable is not bound. @code{add-hook} automatically binds it.  (This is true for all hook variables.)
 
 @item tandem-environment-variables
 @vindex tandem-environment-variables

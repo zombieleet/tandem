@@ -15,6 +15,8 @@
 (require 'tandem-magit)
 (require 'tandem-org)
 (require 'tandem-notes)
+(require 'tandem-install)
+(require 'tandem-embark)
 (require 'seq)
 (require 'subr-x)
 
@@ -61,10 +63,41 @@ KIND is `function' or `variable'."
                   (push s found))))
     (sort found (lambda (a b) (string< a b)))))
 
+(defconst tandem-gen--lisp-directory
+  (expand-file-name "../lisp/" (file-name-directory (or load-file-name buffer-file-name)))
+  "The package's source, next to this file.")
+
+(defvar tandem-gen--defaults nil
+  "Each option's default as written in its defcustom: (SYMBOL . FORM).")
+
+(defun tandem-gen--read-defaults ()
+  "Read every defcustom's default form from lisp/tandem*.el."
+  (dolist (file (directory-files tandem-gen--lisp-directory t "\\`tandem.*\\.el\\'"))
+    (with-temp-buffer
+      (insert-file-contents file)
+      (condition-case nil
+          (while t
+            (let ((form (read (current-buffer))))
+              (when (and (consp form) (eq (car form) 'defcustom))
+                (push (cons (nth 1 form) (nth 2 form)) tandem-gen--defaults))))
+        (end-of-file nil)))))
+
 (defun tandem-gen--default (symbol)
-  "Return SYMBOL's standard value, short, for Texinfo."
-  (let* ((standard (car (get symbol 'standard-value)))
-         (value (condition-case nil (eval standard t) (error standard)))
+  "Return SYMBOL's default, short, for Texinfo.
+A constant shows as its value; a default computed when Emacs starts,
+such as a path in the user's home, shows as the code that computes it,
+so the manual is the same on every machine."
+  (unless tandem-gen--defaults
+    (tandem-gen--read-defaults))
+  (let* ((cell (assq symbol tandem-gen--defaults))
+         (form (cdr cell))
+         (value (cond ((null cell)
+                       ;; Not a defcustom, such as a global minor mode's
+                       ;; variable: its value, which is a constant.
+                       (let ((standard (car (get symbol 'standard-value))))
+                         (condition-case nil (eval standard t) (error standard))))
+                      ((and (consp form) (eq (car form) 'quote)) (cadr form))
+                      (t form)))
          (text (prin1-to-string value)))
     (tandem-gen--texi (if (> (length text) 40) (concat (substring text 0 37) "...") text))))
 
