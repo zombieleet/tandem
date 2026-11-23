@@ -101,6 +101,8 @@ type Suggester struct {
 	spareTimer *time.Timer
 	current    *proc
 	closed     bool
+	// running counts the claude processes that have not exited yet.
+	running sync.WaitGroup
 }
 
 // New returns a Suggester.
@@ -167,7 +169,9 @@ func (s *Suggester) start(cfg Config) (*proc, error) {
 	lines := bufio.NewScanner(out)
 	lines.Buffer(make([]byte, 64<<10), 16<<20)
 	p := &proc{key: cfg.key(), cmd: cmd, stdin: stdin, out: out, lines: lines}
+	s.running.Add(1)
 	go func() {
+		defer s.running.Done()
 		_ = cmd.Wait()
 		_ = w.Close()
 	}()
@@ -314,10 +318,14 @@ func (s *Suggester) Cancel() bool {
 	return true
 }
 
-// Close stops every claude process the Suggester started.
+// closeWait is how long Close waits for the processes it killed to exit.
+const closeWait = 5 * time.Second
+
+// Close stops every claude process the Suggester started, and waits
+// for them to exit: until they have, Windows cannot remove the directory
+// they run in.
 func (s *Suggester) Close() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.closed = true
 	if s.spareTimer != nil {
 		s.spareTimer.Stop()
@@ -328,6 +336,20 @@ func (s *Suggester) Close() {
 		}
 	}
 	s.current, s.spare = nil, nil
+	s.mu.Unlock()
+
+	// Not under the lock: a request that is ending needs it. Nothing
+	// starts after closed is set, so the count only goes down.
+	exited := make(chan struct{})
+	go func() {
+		s.running.Wait()
+		close(exited)
+	}()
+	select {
+	case <-exited:
+	case <-time.After(closeWait):
+		s.opts.Log.Warn("claude processes for suggestions are still running", "waited", closeWait)
+	}
 }
 
 // Clean returns text as it should be inserted at r's cursor: without a

@@ -50,7 +50,9 @@ func (d *Daemon) stopSuggestions() {
 	defer d.suggestMu.Unlock()
 	if d.suggester != nil {
 		d.suggester.Close()
-		_ = os.RemoveAll(d.suggestDir)
+		if err := os.RemoveAll(d.suggestDir); err != nil {
+			d.opts.Log.Warn("cannot remove the directory for suggestions", "error", err)
+		}
 		d.suggester, d.suggestDir = nil, ""
 	}
 }
