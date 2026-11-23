@@ -689,15 +689,6 @@ and `daemon/internal/version`; pushing it builds the daemons and publishes them.
 | `PHASE-1.org` … `PHASE-4.org` | The checklists of each phase, with automatic and visual tests |
 | `.github/workflows/` | CI (`make check` on Linux and macOS, Emacs 29.1 and 30.1; the daemon's tests on Windows) and releases |
 
-## Upgrading from claude-pair
-
-tandem was called claude-pair until version 0.4. In your configuration,
-replace `claude-pair` with `tandem` (`(require 'tandem)`, `M-x tandem`,
-`tandem-…` options). What tandem remembers of Claude's lines moves from
-`~/.cache/claude-pair` to `~/.cache/tandem` by itself, and git notes
-written under `refs/notes/claude-pair` are still read. An old
-`claude-paird` still running stops by itself when idle.
-
 ## License
 
 GPL-3.0-or-later.
