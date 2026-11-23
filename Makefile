@@ -7,7 +7,7 @@ VERSION ?= $(shell sed -n 's/^var Version = "\(.*\)"/\1/p' daemon/internal/versi
 DIST_TARGETS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 LDFLAGS := -s -w -buildid= -X github.com/zombieleet/tandem/daemon/internal/version.Version=$(VERSION)
 
-.PHONY: all deps daemon fakeclaude compile info reference check-manual test test-lisp test-lisp-tcp test-daemon test-wine vet versions checkdoc check dist sums check-sums print-version print-go-release test-package clean help
+.PHONY: all deps daemon fakeclaude compile lisp-deps info reference check-manual test test-lisptest-lisp-tcp test-daemon test-wine vet versions checkdoc check dist sums check-sums print-version print-go-release test-package clean help
 
 all: daemon compile info
 
@@ -83,22 +83,32 @@ print-go-release:
 fakeclaude:
 	cd daemon && $(GO) build -o bin/fakeclaude ./internal/testutil/fakeclaude
 
+# Emacs before 30 comes with an older jsonrpc than lisp/tandem.el asks
+# for. lisp-deps puts the one from GNU ELPA in .elpa/, and LISP_ENV puts
+# that before Emacs's own on the load path, for a child Emacs too.
+ELPA_DIR := $(CURDIR)/.elpa
+LISP_ENV = EMACSLOADPATH="$$(ls -d $(ELPA_DIR)/*-*/ 2>/dev/null | tr '\n' ':')"
+
+## lisp-deps: install into .elpa/ the packages tandem needs that this Emacs lacks (none on Emacs 30)
+lisp-deps:
+	@$(EMACS) -Q --batch -l test/install-deps.el -f tandem-install-deps lisp/tandem.el $(ELPA_DIR)
+
 ## compile: byte-compile the Emacs package, treating warnings as failures
-compile:
-	$(EMACS) -Q --batch -L lisp \
+compile: lisp-deps
+	$(LISP_ENV) $(EMACS) -Q --batch -L lisp \
 	  --eval '(setq byte-compile-error-on-warn t load-prefer-newer t)' \
 	  -f batch-byte-compile $(LISP)
 
 ## test-lisp: run the ERT suite in batch mode against the built daemon
-test-lisp: daemon fakeclaude
-	$(EMACS) -Q --batch -L lisp -L test \
+test-lisp: daemon fakeclaude lisp-deps
+	$(LISP_ENV) $(EMACS) -Q --batch -L lisp -L test \
 	  --eval '(setq load-prefer-newer t)' \
 	  $(addprefix -l ,$(TESTS)) -f ert-run-tests-batch-and-exit </dev/null
 	@# No stdin: a test that asks a question fails at once instead of hanging.
 
 ## test-lisp-tcp: the ERT suite with the daemon on a local TCP port, as on Windows
-test-lisp-tcp: daemon fakeclaude
-	TANDEM_TEST_TRANSPORT=tcp $(EMACS) -Q --batch -L lisp -L test \
+test-lisp-tcp: daemon fakeclaude lisp-deps
+	$(LISP_ENV) TANDEM_TEST_TRANSPORT=tcp $(EMACS) -Q --batch -L lisp -L test \
 	  --eval '(setq load-prefer-newer t)' \
 	  $(addprefix -l ,$(TESTS)) -f ert-run-tests-batch-and-exit </dev/null
 
@@ -152,7 +162,7 @@ check: vet versions compile checkdoc check-manual test
 
 clean:
 	rm -f lisp/*.elc test/*.elc doc/tandem.info doc/dir
-	rm -rf daemon/bin dist
+	rm -rf daemon/bin dist .elpa
 
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## /  /'

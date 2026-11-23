@@ -51,8 +51,10 @@ Return the last value of PREDICATE."
     value))
 
 (defun tandem-test--private-dir (&optional mode)
-  "Make a temporary directory with MODE, #o700 by default."
-  (let ((dir (make-temp-file "cpt-" t)))
+  "Make a temporary directory with MODE, #o700 by default.
+Return its true name: on macOS the temporary directory is under
+/var, a link to /private/var, and git answers with the true one."
+  (let ((dir (file-truename (make-temp-file "cpt-" t))))
     (set-file-modes dir (or mode #o700))
     dir))
 

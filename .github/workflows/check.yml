@@ -25,6 +25,11 @@ jobs:
       - uses: purcell/setup-emacs@master
         with:
           version: ${{ matrix.emacs }}
+      # make check-manual needs makeinfo, which the macOS runner lacks.
+      - if: runner.os == 'macOS'
+        run: |
+          brew install texinfo
+          echo "$(brew --prefix texinfo)/bin" >> "$GITHUB_PATH"
       - run: make check
 
   daemon-windows:
