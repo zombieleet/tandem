@@ -9,11 +9,16 @@
 
 ;;; Code:
 
-(defconst tandem-daemon-sums-version nil
+(defconst tandem-daemon-sums-version "0.4.0"
   "The version the sums below are for.")
 
 (defconst tandem-daemon-sums
-  '()
+  '(("darwin-amd64" . "d431544e49e94e7502cb6abb51251fd73f4c34b3ca4c2247834453075212a26c")
+    ("darwin-arm64" . "4335ee4d58653fe8981bfdce465ac7bed1f6eb17c9b55e5920d7bc8729afbae4")
+    ("linux-amd64" . "7c5138c9384f881d64d23f75c4b608ee51e0805c00ecbdfe406700c06dc4549c")
+    ("linux-arm64" . "803fe3bcefbc955b1f60457b43155eb8eb8811b9010138c4c6f623f19b60e249")
+    ("windows-amd64" . "d1bd633c5e4167a65c2e3e6e40aa3de3cfd13e26d9cdba663dc1613739669208")
+    ("windows-arm64" . "6cf21e757293a84e4682ba3268deae5fd63074c8c91a06bf4a2f77de8d865748"))
   "The released daemons' SHA-256, by platform.")
 
 (provide 'tandem-daemon-sums)
