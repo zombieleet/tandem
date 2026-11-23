@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026 Victory
 
 ;; Author: Victory <osikwemhev@gmail.com>
+;; Assisted-by: Claude:claude-opus-5-5
 ;; Keywords: tools, convenience
 ;; URL: https://github.com/zombieleet/tandem
 

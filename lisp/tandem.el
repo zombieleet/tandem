@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026 Victory
 
 ;; Author: Victory <osikwemhev@gmail.com>
+;; Assisted-by: Claude:claude-opus-5-5
 ;; Version: 0.4.0
 ;; Package-Requires: ((emacs "29.1") (jsonrpc "1.0.25"))
 ;; Keywords: tools, convenience
